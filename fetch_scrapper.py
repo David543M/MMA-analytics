@@ -41,6 +41,7 @@ def scrape_ufc_fighters():
                     fighter_data = {
                         "name": f"{cols[0].text.strip()} {cols[1].text.strip()}",
                         "nickname": cols[2].text.strip(),
+                        "division": "UFC",  # <--- AJOUTE CETTE LIGNE (Valeur par défaut)
                         "slpm": clean_float(cols[5].text),
                         "str_acc": clean_float(cols[6].text),
                         "sapm": clean_float(cols[7].text),
