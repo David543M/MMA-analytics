@@ -19,9 +19,6 @@ jobs:
           pip install requests beautifulsoup4 supabase pandas
 
       - name: Run scraper
-        run: python fetch_scrapper.py
-
-      - name: Run scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
