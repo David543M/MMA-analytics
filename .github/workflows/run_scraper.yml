@@ -1,0 +1,22 @@
+name: Run MMA Scraper
+on:
+  workflow_dispatch: # Permet de lancer le script manuellement avec un bouton
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 supabase pandas
+
+      - name: Run scraper
+        run: python fetch_scrapper.py
