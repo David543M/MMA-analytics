@@ -2,10 +2,13 @@ import requests
 from bs4 import BeautifulSoup
 from supabase import create_client
 
-# 1. Tes clés Supabase (à trouver dans Settings > API sur Supabase)
-SUPABASE_URL = "SUPABASE_URL"
-SUPABASE_KEY = "SUPABASE_KEY"
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("Erreur : Les clés Supabase ne sont pas configurées dans les variables d'environnement.")
+else:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def scrape_ufc_fighters():
     print("Démarrage du scraping...")
