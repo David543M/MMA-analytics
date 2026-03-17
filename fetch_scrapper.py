@@ -3,8 +3,8 @@ from bs4 import BeautifulSoup
 from supabase import create_client
 
 # 1. Tes clés Supabase (à trouver dans Settings > API sur Supabase)
-SUPABASE_URL = "
-SUPABASE_KEY = "
+SUPABASE_URL = "SUPABASE_URL"
+SUPABASE_KEY = "SUPABASE_KEY"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def scrape_ufc_fighters():
