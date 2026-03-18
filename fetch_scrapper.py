@@ -116,14 +116,12 @@ def scrape_ufc_fighters():
             # La table liste des combattants a 11 colonnes
             if len(cols) >= 10:
                 full_name = "Inconnu"
-                try:
+try:
                     fighter_link = cols[0].find('a')['href']
-                    # Correction des guillemets ici :
                     full_name = f"{' '.join(cols[0].text.split())} {' '.join(cols[1].text.split())}"
                     
                     fighter_info = {
                         "name": full_name,
-                        # Et correction des guillemets ici aussi :
                         "nickname": ' '.join(cols[2].text.split()),
                         "division": "UFC",
                         "slpm": clean_float(cols[5].text),
@@ -134,13 +132,23 @@ def scrape_ufc_fighters():
                         "violence_score": 50
                     }
                     
-                    # Upsert du fighter et récupération de l'UUID
-                    res = supabase.table("fighters").upsert(fighter_info).execute()
-                    if res.data:
-                        f_id = res.data[0]['id']
-                        print(f"✅ Fighter : {full_name} (ID: {f_id})")
-                        # Lancement du scraping de ses combats
-                        scrape_fights(fighter_link, f_id, supabase)
+                    # 🛑 NOUVELLE LOGIQUE ANTI-DOUBLONS 🛑
+                    # 1. On cherche si le combattant existe déjà
+                    existing = supabase.table("fighters").select("id").eq("name", full_name).execute()
+                    
+                    if existing.data:
+                        # Le combattant est déjà là, on garde son vieil ID
+                        f_id = existing.data[0]['id']
+                        print(f"⚡ Déjà en base : {full_name} (ID: {f_id})")
+                    else:
+                        # Nouveau combattant, on l'insère
+                        res = supabase.table("fighters").insert(fighter_info).execute()
+                        if res.data:
+                            f_id = res.data[0]['id']
+                            print(f"✅ Ajout : {full_name} (ID: {f_id})")
+                    
+                    # 2. Lancement du scraping de ses combats avec le bon ID unique
+                    scrape_fights(fighter_link, f_id, supabase)
                     
                     time.sleep(0.1) # Respect du serveur
                     
