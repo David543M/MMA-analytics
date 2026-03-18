@@ -108,6 +108,8 @@ def scrape_ufc_fighters():
         
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
         response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        rows = soup.find_all('tr', class_='b-statistics__table-row')[1:]
         
         for row in rows:
             cols = row.find_all('td')
