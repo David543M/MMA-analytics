@@ -113,11 +113,13 @@ def scrape_ufc_fighters():
                 full_name = "Inconnu"
                 try:
                     fighter_link = cols[0].find('a')['href']
-                    full_name = f"{" ".join(cols[0].text.split())} {" ".join(cols[1].text.split())}"
+                    # Correction des guillemets ici :
+                    full_name = f"{' '.join(cols[0].text.split())} {' '.join(cols[1].text.split())}"
                     
                     fighter_info = {
                         "name": full_name,
-                        "nickname": " ".join(cols[2].text.split()),
+                        # Et correction des guillemets ici aussi :
+                        "nickname": ' '.join(cols[2].text.split()),
                         "division": "UFC",
                         "slpm": clean_float(cols[5].text),
                         "str_acc": clean_float(cols[6].text),
@@ -138,7 +140,7 @@ def scrape_ufc_fighters():
                     time.sleep(0.1) # Respect du serveur
                     
                 except Exception as e:
-                    print(f"❌ Erreur sur {full_name} : {e}")
+                    print(f"❌ Erreur sur {full_name if 'full_name' in locals() else 'Ligne'} : {e}")
 
 if __name__ == "__main__":
     scrape_ufc_fighters()
