@@ -35,19 +35,18 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all('td')
         if len(cols) >= 7:
             try:
-                # NETTOYAGE DU RÉSULTAT (Crucial pour la contrainte check)
-                raw_result = cols[0].text.strip().lower() # Convertit "WIN" en "win"
-                
-                # On s'assure que si c'est "w", on met "win", etc.
-                if 'win' in raw_result or raw_result == 'w':
-                    result = 'win'
-                elif 'loss' in raw_result or raw_result == 'l':
-                    result = 'loss'
-                elif 'draw' in raw_result or raw_result == 'd':
-                    result = 'draw'
-                else:
-                    result = 'nc' # No Contest
+                # 1. NETTOYAGE DU RÉSULTAT
+                # On prend le texte, on enlève les espaces et on met en minuscules
+                raw_res = cols[0].text.strip().lower()
+                result = 'win' if 'win' in raw_res else 'loss' if 'loss' in raw_res else 'draw'
 
+                # 2. NETTOYAGE DE L'ADVERSAIRE (Le point bloquant !)
+                # L'adversaire est dans le 2ème <td>, généralement dans le 2ème paragraphe
+                opponent_p = cols[1].find_all('p')
+                # Si on trouve plusieurs <p>, le deuxième est souvent l'adversaire
+                opponent_name = opponent_p[1].text.strip() if len(opponent_p) > 1 else cols[1].text.strip()
+                
+                # 3. DATE ET ROUND
                 raw_date = cols[6].find_all('p')[1].text.strip()
                 formatted_date = clean_date(raw_date)
                 
@@ -56,19 +55,19 @@ def scrape_fights(fighter_url, fighter_id, supabase):
 
                 fight_data = {
                     "fighter_id": fighter_id,
-                    "result": result, # Valeur propre : win, loss ou draw
-                    "opponent_name": cols[1].text.strip(),
+                    "result": result,
+                    "opponent_name": opponent_name[:255], # On limite la taille par sécurité
                     "method": cols[3].find_all('p')[0].text.strip(),
                     "round": round_int,
                     "time": cols[5].text.strip(),
-                    "event_name": cols[6].text.strip(),
+                    "event_name": cols[6].find_all('p')[0].text.strip(),
                     "date": formatted_date
                 }
                 
                 if formatted_date:
                     supabase.table("fights").upsert(fight_data).execute()
             except Exception as e:
-                print(f"      Erreur combat : {e}")
+                print(f"      Erreur technique combat : {e}")
 
 def scrape_ufc_fighters():
     if not SUPABASE_URL or not SUPABASE_KEY:
