@@ -4,9 +4,21 @@ from bs4 import BeautifulSoup
 from supabase import create_client
 import time
 import string
+from datetime import datetime
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
+def clean_date(date_text):
+    """Transforme 'Sep. 23, 2006' en '2006-09-23'."""
+    try:
+        # On enlève les points après les mois (ex: Sep. -> Sep)
+        clean_text = date_text.replace('.', '').strip()
+        # Conversion en objet date puis en texte ISO
+        date_obj = datetime.strptime(clean_text, "%b %d, %Y")
+        return date_obj.strftime("%Y-%m-%d")
+    except Exception:
+        return None # Si la date est illisible, on laisse vide
 
 def clean_float(text):
     if not text or "--" in text: return 0.0
@@ -15,7 +27,6 @@ def clean_float(text):
     except ValueError: return 0.0
 
 def scrape_fights(fighter_url, fighter_id, supabase):
-    """Récupère les combats et les lie via l'ID unique de Supabase."""
     response = requests.get(fighter_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     fight_rows = soup.find_all('tr', class_='b-fight-details__table-row')[1:]
@@ -24,21 +35,25 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all('td')
         if len(cols) >= 7:
             try:
-                # Nettoyage du round pour correspondre au type int4 de ta table
+                raw_date = cols[6].find_all('p')[1].text.strip()
+                formatted_date = clean_date(raw_date)
+                
                 round_val = cols[4].text.strip()
                 round_int = int(round_val) if round_val.isdigit() else 0
 
                 fight_data = {
-                    "fighter_id": fighter_id, # L'ID UUID récupéré
+                    "fighter_id": fighter_id,
                     "result": cols[0].text.strip(),
                     "opponent_name": cols[1].text.strip(),
                     "method": cols[3].find_all('p')[0].text.strip(),
                     "round": round_int,
                     "time": cols[5].text.strip(),
                     "event_name": cols[6].text.strip(),
-                    "date": cols[6].find_all('p')[1].text.strip()
+                    "date": formatted_date # La date est maintenant propre !
                 }
-                supabase.table("fights").upsert(fight_data).execute()
+                
+                if formatted_date:
+                    supabase.table("fights").upsert(fight_data).execute()
             except Exception as e:
                 print(f"      Erreur combat : {e}")
 
@@ -50,7 +65,6 @@ def scrape_ufc_fighters():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("🚀 Démarrage du scraping global...")
     
-    # On boucle sur tout l'alphabet
     for char in string.ascii_lowercase:
         print(f"--- Lettre : {char.upper()} ---")
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
