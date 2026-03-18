@@ -116,7 +116,7 @@ def scrape_ufc_fighters():
             # La table liste des combattants a 11 colonnes
             if len(cols) >= 10:
                 full_name = "Inconnu"
-try:
+                try:
                     fighter_link = cols[0].find('a')['href']
                     full_name = f"{' '.join(cols[0].text.split())} {' '.join(cols[1].text.split())}"
                     
