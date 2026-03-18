@@ -35,6 +35,19 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all('td')
         if len(cols) >= 7:
             try:
+                # NETTOYAGE DU RÉSULTAT (Crucial pour la contrainte check)
+                raw_result = cols[0].text.strip().lower() # Convertit "WIN" en "win"
+                
+                # On s'assure que si c'est "w", on met "win", etc.
+                if 'win' in raw_result or raw_result == 'w':
+                    result = 'win'
+                elif 'loss' in raw_result or raw_result == 'l':
+                    result = 'loss'
+                elif 'draw' in raw_result or raw_result == 'd':
+                    result = 'draw'
+                else:
+                    result = 'nc' # No Contest
+
                 raw_date = cols[6].find_all('p')[1].text.strip()
                 formatted_date = clean_date(raw_date)
                 
@@ -43,13 +56,13 @@ def scrape_fights(fighter_url, fighter_id, supabase):
 
                 fight_data = {
                     "fighter_id": fighter_id,
-                    "result": cols[0].text.strip(),
+                    "result": result, # Valeur propre : win, loss ou draw
                     "opponent_name": cols[1].text.strip(),
                     "method": cols[3].find_all('p')[0].text.strip(),
                     "round": round_int,
                     "time": cols[5].text.strip(),
                     "event_name": cols[6].text.strip(),
-                    "date": formatted_date # La date est maintenant propre !
+                    "date": formatted_date
                 }
                 
                 if formatted_date:
