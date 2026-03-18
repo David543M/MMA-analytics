@@ -96,16 +96,18 @@ def scrape_ufc_fighters():
         print("Erreur : Clés Supabase manquantes.")
         return
 
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("🚀 Démarrage du scraping global...")
     
     # Boucle sur tout l'alphabet
     for char in string.ascii_lowercase:
         print(f"--- Lettre : {char.upper()} ---")
+        
+        # On crée une nouvelle connexion "fraîche" pour chaque lettre de l'alphabet.
+        # Ça évite l'erreur des 20 000 requêtes (last_stream_id:19999)
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
         response = requests.get(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        rows = soup.find_all('tr', class_='b-statistics__table-row')[1:]
         
         for row in rows:
             cols = row.find_all('td')
