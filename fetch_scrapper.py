@@ -39,11 +39,11 @@ def scrape_fights(fighter_url, fighter_id, supabase):
             try:
                 # 1. RÉSULTAT (Colonne 0)
                 raw_res = cols[0].text.strip().lower()
-                if 'win' in raw_res: result = 'Win'
-                elif 'loss' in raw_res: result = 'Loss'
-                elif 'draw' in raw_res: result = 'Draw'
-                elif 'nc' in raw_res: result = 'No Contest'
-                else: result = 'Loss'
+                if 'win' in raw_res: result = 'win'
+                elif 'loss' in raw_res: result = 'loss'
+                elif 'draw' in raw_res: result = 'draw'
+                elif 'nc' in raw_res: result = 'nc'
+                else: result = 'loss'
 
                 # 2. ADVERSAIRE (Colonne 1)
                 opponent_p = cols[1].find_all('p')
