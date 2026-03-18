@@ -6,19 +6,18 @@ import time
 import string
 from datetime import datetime
 
+# Configuration Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 def clean_date(date_text):
     """Transforme 'Sep. 23, 2006' en '2006-09-23'."""
     try:
-        # On enlève les points après les mois (ex: Sep. -> Sep)
         clean_text = date_text.replace('.', '').strip()
-        # Conversion en objet date puis en texte ISO
         date_obj = datetime.strptime(clean_text, "%b %d, %Y")
         return date_obj.strftime("%Y-%m-%d")
     except Exception:
-        return None # Si la date est illisible, on laisse vide
+        return None
 
 def clean_float(text):
     if not text or "--" in text: return 0.0
@@ -27,6 +26,7 @@ def clean_float(text):
     except ValueError: return 0.0
 
 def scrape_fights(fighter_url, fighter_id, supabase):
+    """Récupère et nettoie les combats pour un combattant donné."""
     response = requests.get(fighter_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     fight_rows = soup.find_all('tr', class_='b-fight-details__table-row')[1:]
@@ -35,7 +35,7 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all('td')
         if len(cols) >= 7:
             try:
-# 1. NETTOYAGE DU RÉSULTAT (Format Capitalized : Win/Loss/Draw)
+                # 1. NETTOYAGE DU RÉSULTAT (Format 'Win', 'Loss', 'Draw' pour la contrainte)
                 raw_res = cols[0].text.strip().lower()
                 if 'win' in raw_res:
                     result = 'Win'
@@ -44,31 +44,46 @@ def scrape_fights(fighter_url, fighter_id, supabase):
                 elif 'draw' in raw_res:
                     result = 'Draw'
                 else:
-                    result = 'Loss' # Valeur de secours qui respecte souvent la contrainte
+                    result = 'Loss'
 
-                # 2. NETTOYAGE DE L'ÉVÉNEMENT (On enlève les -- qui font planter)
+                # 2. EXTRACTION PROPRE DE L'ADVERSAIRE
+                opponent_p = cols[1].find_all('p')
+                opponent_name = opponent_p[1].text.strip() if len(opponent_p) > 1 else cols[1].text.strip()
+
+                # 3. NETTOYAGE DE L'ÉVÉNEMENT ET DE LA DATE
                 event_p = cols[6].find_all('p')
                 event_name = event_p[0].text.strip() if event_p else "UFC Event"
                 if event_name == "--" or not event_name:
                     event_name = "UFC Event"
+                
+                raw_date = event_p[1].text.strip() if len(event_p) > 1 else ""
+                formatted_date = clean_date(raw_date)
 
-                # 3. NETTOYAGE DE LA MÉTHODE
+                # 4. NETTOYAGE DE LA MÉTHODE, DU ROUND ET DU TEMPS
                 method_raw = cols[3].find_all('p')[0].text.strip()
                 method = method_raw if method_raw != "--" else "N/A"
+                
+                round_val = cols[4].text.strip()
+                round_int = int(round_val) if round_val.isdigit() else 0
+                
+                time_val = cols[5].text.strip()
+                if time_val == "--": time_val = "0:00"
 
+                # 5. PRÉPARATION DES DONNÉES
                 fight_data = {
                     "fighter_id": fighter_id,
-                    "result": result, # 'Win', 'Loss' ou 'Draw'
+                    "result": result,
                     "opponent_name": opponent_name[:255].strip(),
                     "method": method,
                     "round": round_int,
-                    "time": time_val if time_val != "--" else "0:00",
+                    "time": time_val,
                     "event_name": event_name,
                     "date": formatted_date
                 }
                 
                 if formatted_date:
                     supabase.table("fights").upsert(fight_data).execute()
+                    
             except Exception as e:
                 print(f"      Erreur technique combat : {e}")
 
@@ -90,6 +105,7 @@ def scrape_ufc_fighters():
         for row in rows:
             cols = row.find_all('td')
             if len(cols) >= 10:
+                full_name = "Inconnu"
                 try:
                     fighter_link = cols[0].find('a')['href']
                     full_name = f"{cols[0].text.strip()} {cols[1].text.strip()}"
@@ -106,19 +122,17 @@ def scrape_ufc_fighters():
                         "violence_score": 50
                     }
                     
-                    # 1. On enregistre le fighter et on RÉCUPÈRE son ID (UUID)
+                    # Upsert du fighter et récupération de l'UUID
                     res = supabase.table("fighters").upsert(fighter_info).execute()
-                    f_id = res.data[0]['id'] # C'est cet ID qu'on utilise pour la table fights
+                    if res.data:
+                        f_id = res.data[0]['id']
+                        print(f"✅ Fighter : {full_name} (ID: {f_id})")
+                        scrape_fights(fighter_link, f_id, supabase)
                     
-                    print(f"✅ Fighter : {full_name} (ID: {f_id})")
-                    
-                    # 2. On scrape ses combats en lui donnant cet ID
-                    scrape_fights(fighter_link, f_id, supabase)
-                    
-                    time.sleep(0.1) # Sécurité anti-ban
+                    time.sleep(0.1) # Respect du serveur
                     
                 except Exception as e:
-                    print(f"❌ Erreur sur {full_name if 'full_name' in locals() else 'Ligne'} : {e}")
+                    print(f"❌ Erreur sur {full_name} : {e}")
 
 if __name__ == "__main__":
     scrape_ufc_fighters()
