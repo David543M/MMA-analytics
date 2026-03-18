@@ -20,60 +20,63 @@ def clean_date(date_text):
         return None
 
 def clean_float(text):
+    """Nettoie les pourcentages et les tirets pour les statistiques."""
     if not text or "--" in text: return 0.0
     clean_text = text.replace('"', '').replace('%', '').strip()
     try: return float(clean_text)
     except ValueError: return 0.0
 
 def scrape_fights(fighter_url, fighter_id, supabase):
-    """Récupère et nettoie les combats pour un combattant donné."""
+    """Récupère et nettoie l'historique des combats d'un profil UFC."""
     response = requests.get(fighter_url)
     soup = BeautifulSoup(response.text, 'html.parser')
     fight_rows = soup.find_all('tr', class_='b-fight-details__table-row')[1:]
     
     for row in fight_rows:
         cols = row.find_all('td')
-        if len(cols) >= 7:
+        # La table des combats a 10 colonnes sur la page de profil
+        if len(cols) >= 10:
             try:
-                # 1. NETTOYAGE DU RÉSULTAT (Format 'Win', 'Loss', 'Draw' pour la contrainte)
+                # 1. RÉSULTAT (Colonne 0)
                 raw_res = cols[0].text.strip().lower()
-                if 'win' in raw_res:
-                    result = 'Win'
-                elif 'loss' in raw_res:
-                    result = 'Loss'
-                elif 'draw' in raw_res:
-                    result = 'Draw'
-                else:
-                    result = 'Loss'
+                if 'win' in raw_res: result = 'win'
+                elif 'loss' in raw_res: result = 'loss'
+                elif 'draw' in raw_res: result = 'draw'
+                else: result = 'nc'
 
-                # 2. EXTRACTION PROPRE DE L'ADVERSAIRE
+                # 2. ADVERSAIRE (Colonne 1)
                 opponent_p = cols[1].find_all('p')
-                opponent_name = opponent_p[1].text.strip() if len(opponent_p) > 1 else cols[1].text.strip()
+                raw_opp = opponent_p[1].text if len(opponent_p) > 1 else cols[1].text
+                opponent_name = " ".join(raw_opp.split())[:255]
 
-                # 3. NETTOYAGE DE L'ÉVÉNEMENT ET DE LA DATE
+                # 3. ÉVÉNEMENT & DATE (Colonne 6)
                 event_p = cols[6].find_all('p')
-                event_name = event_p[0].text.strip() if event_p else "UFC Event"
-                if event_name == "--" or not event_name:
+                raw_event = event_p[0].text if event_p else "UFC Event"
+                event_name = " ".join(raw_event.split())
+                if not event_name or event_name == "--":
                     event_name = "UFC Event"
                 
-                raw_date = event_p[1].text.strip() if len(event_p) > 1 else ""
+                raw_date = event_p[1].text if len(event_p) > 1 else ""
                 formatted_date = clean_date(raw_date)
 
-                # 4. NETTOYAGE DE LA MÉTHODE, DU ROUND ET DU TEMPS
-                method_raw = cols[3].find_all('p')[0].text.strip()
-                method = method_raw if method_raw != "--" else "N/A"
+                # 4. MÉTHODE (Colonne 7 - C'était l'erreur majeure !)
+                raw_method = cols[7].find_all('p')[0].text if cols[7].find_all('p') else cols[7].text
+                method = " ".join(raw_method.split())
+                if not method or method == "--": method = "N/A"
                 
-                round_val = cols[4].text.strip()
-                round_int = int(round_val) if round_val.isdigit() else 0
+                # 5. ROUND (Colonne 8)
+                raw_round = cols[8].text.strip()
+                round_int = int(raw_round) if raw_round.isdigit() else 1
                 
-                time_val = cols[5].text.strip()
-                if time_val == "--": time_val = "0:00"
+                # 6. TEMPS (Colonne 9)
+                time_val = cols[9].text.strip()
+                if not time_val or time_val == "--": time_val = "0:00"
 
-                # 5. PRÉPARATION DES DONNÉES
+                # 7. PRÉPARATION DES DONNÉES
                 fight_data = {
                     "fighter_id": fighter_id,
                     "result": result,
-                    "opponent_name": opponent_name[:255].strip(),
+                    "opponent_name": opponent_name,
                     "method": method,
                     "round": round_int,
                     "time": time_val,
@@ -95,6 +98,7 @@ def scrape_ufc_fighters():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("🚀 Démarrage du scraping global...")
     
+    # Boucle sur tout l'alphabet
     for char in string.ascii_lowercase:
         print(f"--- Lettre : {char.upper()} ---")
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
@@ -104,15 +108,16 @@ def scrape_ufc_fighters():
         
         for row in rows:
             cols = row.find_all('td')
+            # La table liste des combattants a 11 colonnes
             if len(cols) >= 10:
                 full_name = "Inconnu"
                 try:
                     fighter_link = cols[0].find('a')['href']
-                    full_name = f"{cols[0].text.strip()} {cols[1].text.strip()}"
+                    full_name = f"{" ".join(cols[0].text.split())} {" ".join(cols[1].text.split())}"
                     
                     fighter_info = {
                         "name": full_name,
-                        "nickname": cols[2].text.strip(),
+                        "nickname": " ".join(cols[2].text.split()),
                         "division": "UFC",
                         "slpm": clean_float(cols[5].text),
                         "str_acc": clean_float(cols[6].text),
@@ -127,6 +132,7 @@ def scrape_ufc_fighters():
                     if res.data:
                         f_id = res.data[0]['id']
                         print(f"✅ Fighter : {full_name} (ID: {f_id})")
+                        # Lancement du scraping de ses combats
                         scrape_fights(fighter_link, f_id, supabase)
                     
                     time.sleep(0.1) # Respect du serveur
