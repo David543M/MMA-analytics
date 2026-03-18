@@ -53,14 +53,27 @@ def scrape_fights(fighter_url, fighter_id, supabase):
                 round_val = cols[4].text.strip()
                 round_int = int(round_val) if round_val.isdigit() else 0
 
+# Nettoyage des champs techniques
+                method = cols[3].find_all('p')[0].text.strip()
+                if method == "--" or not method:
+                    method = "N/A"
+                
+                event = cols[6].find_all('p')[0].text.strip()
+                if not event or event == "--":
+                    event = "UFC Event"
+
+                time_val = cols[5].text.strip()
+                if time_val == "--":
+                    time_val = "0:00"
+
                 fight_data = {
                     "fighter_id": fighter_id,
-                    "result": result,
-                    "opponent_name": opponent_name[:255], # On limite la taille par sécurité
-                    "method": cols[3].find_all('p')[0].text.strip(),
+                    "result": result, # 'win', 'loss', 'draw'
+                    "opponent_name": opponent_name[:255],
+                    "method": method, # On envoie "N/A" au lieu de "--"
                     "round": round_int,
-                    "time": cols[5].text.strip(),
-                    "event_name": cols[6].find_all('p')[0].text.strip(),
+                    "time": time_val,
+                    "event_name": event,
                     "date": formatted_date
                 }
                 
