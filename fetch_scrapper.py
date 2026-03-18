@@ -35,45 +35,35 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all('td')
         if len(cols) >= 7:
             try:
-                # 1. NETTOYAGE DU RÉSULTAT
-                # On prend le texte, on enlève les espaces et on met en minuscules
+# 1. NETTOYAGE DU RÉSULTAT (Format Capitalized : Win/Loss/Draw)
                 raw_res = cols[0].text.strip().lower()
-                result = 'win' if 'win' in raw_res else 'loss' if 'loss' in raw_res else 'draw'
+                if 'win' in raw_res:
+                    result = 'Win'
+                elif 'loss' in raw_res:
+                    result = 'Loss'
+                elif 'draw' in raw_res:
+                    result = 'Draw'
+                else:
+                    result = 'Loss' # Valeur de secours qui respecte souvent la contrainte
 
-                # 2. NETTOYAGE DE L'ADVERSAIRE (Le point bloquant !)
-                # L'adversaire est dans le 2ème <td>, généralement dans le 2ème paragraphe
-                opponent_p = cols[1].find_all('p')
-                # Si on trouve plusieurs <p>, le deuxième est souvent l'adversaire
-                opponent_name = opponent_p[1].text.strip() if len(opponent_p) > 1 else cols[1].text.strip()
-                
-                # 3. DATE ET ROUND
-                raw_date = cols[6].find_all('p')[1].text.strip()
-                formatted_date = clean_date(raw_date)
-                
-                round_val = cols[4].text.strip()
-                round_int = int(round_val) if round_val.isdigit() else 0
+                # 2. NETTOYAGE DE L'ÉVÉNEMENT (On enlève les -- qui font planter)
+                event_p = cols[6].find_all('p')
+                event_name = event_p[0].text.strip() if event_p else "UFC Event"
+                if event_name == "--" or not event_name:
+                    event_name = "UFC Event"
 
-# Nettoyage des champs techniques
-                method = cols[3].find_all('p')[0].text.strip()
-                if method == "--" or not method:
-                    method = "N/A"
-                
-                event = cols[6].find_all('p')[0].text.strip()
-                if not event or event == "--":
-                    event = "UFC Event"
-
-                time_val = cols[5].text.strip()
-                if time_val == "--":
-                    time_val = "0:00"
+                # 3. NETTOYAGE DE LA MÉTHODE
+                method_raw = cols[3].find_all('p')[0].text.strip()
+                method = method_raw if method_raw != "--" else "N/A"
 
                 fight_data = {
                     "fighter_id": fighter_id,
-                    "result": result, # 'win', 'loss', 'draw'
-                    "opponent_name": opponent_name[:255],
-                    "method": method, # On envoie "N/A" au lieu de "--"
+                    "result": result, # 'Win', 'Loss' ou 'Draw'
+                    "opponent_name": opponent_name[:255].strip(),
+                    "method": method,
                     "round": round_int,
-                    "time": time_val,
-                    "event_name": event,
+                    "time": time_val if time_val != "--" else "0:00",
+                    "event_name": event_name,
                     "date": formatted_date
                 }
                 
