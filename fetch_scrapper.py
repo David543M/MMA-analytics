@@ -33,9 +33,88 @@ def clean_float(text):
         return 0.0
 
 
-def scrape_fights(fighter_url, fighter_id, supabase):
+def clean_int(text):
+    """Nettoie une valeur entière, gère '--' et les formats type '45 of 90'."""
+    if not text or "--" in text:
+        return 0
+
+    clean_text = " ".join(text.split()).strip()
+
+    if "of" in clean_text.lower():
+        clean_text = clean_text.lower().split("of", 1)[0].strip()
+
+    try:
+        return int(clean_text)
+    except ValueError:
+        digits = "".join(ch for ch in clean_text if ch.isdigit())
+        return int(digits) if digits else 0
+
+
+def normalize_name(name):
+    return " ".join(name.lower().split())
+
+
+def scrape_fight_striking(fight_url, fighter_name):
+    """
+    Récupère les strikes landed / absorbed depuis la page détail du combat UFC Stats.
+    On utilise TOTAL STR en priorité, avec fallback sur SIG STR si besoin.
+    """
+    try:
+        response = requests.get(fight_url, timeout=20)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        detail_rows = soup.find_all("tr", class_="b-fight-details__table-row")
+        current_name = normalize_name(fighter_name)
+
+        for row in detail_rows:
+            cols = row.find_all("td")
+            if len(cols) < 6:
+                continue
+
+            name_tags = cols[1].find_all("p")
+            if len(name_tags) < 2:
+                continue
+
+            names = [normalize_name(tag.get_text(" ", strip=True)) for tag in name_tags[:2]]
+
+            # TOTAL STR est généralement en colonne 5, fallback sur SIG STR (colonne 3)
+            strike_tags = cols[5].find_all("p") if len(cols) > 5 else []
+            if len(strike_tags) < 2 and len(cols) > 3:
+                strike_tags = cols[3].find_all("p")
+
+            if len(strike_tags) < 2:
+                continue
+
+            strikes = [clean_int(tag.get_text(" ", strip=True)) for tag in strike_tags[:2]]
+
+            if current_name == names[0]:
+                return {
+                    "strikes_landed": strikes[0],
+                    "strikes_absorbed": strikes[1],
+                }
+
+            if current_name == names[1]:
+                return {
+                    "strikes_landed": strikes[1],
+                    "strikes_absorbed": strikes[0],
+                }
+
+        return {
+            "strikes_landed": 0,
+            "strikes_absorbed": 0,
+        }
+
+    except Exception as e:
+        print(f"      Erreur scraping striking combat : {e}")
+        return {
+            "strikes_landed": 0,
+            "strikes_absorbed": 0,
+        }
+
+
+def scrape_fights(fighter_url, fighter_id, fighter_name, supabase):
     """Récupère les vraies stats techniques et l'historique des combats d'un profil UFC."""
-    response = requests.get(fighter_url)
+    response = requests.get(fighter_url, timeout=20)
     soup = BeautifulSoup(response.text, "html.parser")
 
     tech_stats = {
@@ -76,6 +155,8 @@ def scrape_fights(fighter_url, fighter_id, supabase):
         cols = row.find_all("td")
         if len(cols) >= 10:
             try:
+                fight_url = row.get("data-link")
+
                 raw_res = cols[0].text.strip().lower()
                 if "win" in raw_res:
                     result = "win"
@@ -113,6 +194,14 @@ def scrape_fights(fighter_url, fighter_id, supabase):
                 if not time_val or time_val == "--":
                     time_val = "0:00"
 
+                striking_data = {
+                    "strikes_landed": 0,
+                    "strikes_absorbed": 0,
+                }
+
+                if fight_url:
+                    striking_data = scrape_fight_striking(fight_url, fighter_name)
+
                 fight_data = {
                     "fighter_id": fighter_id,
                     "result": result,
@@ -122,10 +211,30 @@ def scrape_fights(fighter_url, fighter_id, supabase):
                     "time": time_val,
                     "event_name": event_name,
                     "date": formatted_date,
+                    "strikes_landed": striking_data["strikes_landed"],
+                    "strikes_absorbed": striking_data["strikes_absorbed"],
                 }
 
                 if formatted_date:
-                    supabase.table("fights").upsert(fight_data).execute()
+                    existing = (
+                        supabase.table("fights")
+                        .select("id")
+                        .eq("fighter_id", fighter_id)
+                        .eq("date", formatted_date)
+                        .eq("opponent_name", opponent_name)
+                        .execute()
+                    )
+
+                    if existing.data:
+                        fight_row_id = existing.data[0]["id"]
+                        (
+                            supabase.table("fights")
+                            .update(fight_data)
+                            .eq("id", fight_row_id)
+                            .execute()
+                        )
+                    else:
+                        supabase.table("fights").insert(fight_data).execute()
 
             except Exception as e:
                 print(f"      Erreur technique combat : {e}")
@@ -143,7 +252,7 @@ def scrape_ufc_fighters():
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
         url = f"http://ufcstats.com/statistics/fighters?char={char}&page=all"
-        response = requests.get(url)
+        response = requests.get(url, timeout=20)
         soup = BeautifulSoup(response.text, "html.parser")
         rows = soup.find_all("tr", class_="b-statistics__table-row")[1:]
 
@@ -175,7 +284,7 @@ def scrape_ufc_fighters():
                         else:
                             continue
 
-                    scrape_fights(fighter_link, f_id, supabase)
+                    scrape_fights(fighter_link, f_id, full_name, supabase)
                     time.sleep(0.1)
 
                 except Exception as e:
