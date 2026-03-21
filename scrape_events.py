@@ -9,10 +9,7 @@ from supabase import create_client
 
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = (
-    os.environ.get("SUPABASE_KEY")
-    or ""
-)
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 EVENT_INDEX_SOURCES = [
     {"status": "completed", "url": "http://ufcstats.com/statistics/events/completed?page=all"},
