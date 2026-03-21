@@ -1,7 +1,6 @@
 import os
 import re
 import time
-from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,7 +8,11 @@ from supabase import create_client
 
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    or os.environ.get("SUPABASE_KEY")
+    or ""
+)
 
 EVENT_INDEX_SOURCES = [
     {"status": "completed", "url": "http://ufcstats.com/statistics/events/completed?page=all"},
@@ -39,6 +42,13 @@ def normalize_whitespace(value):
 
 def normalize_key(value):
     return normalize_whitespace(value).lower()
+
+
+def normalize_fighter_name_for_match(name):
+    text = normalize_key(name)
+    text = re.sub(r"[\"'`´.-]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def slugify(value):
@@ -195,43 +205,62 @@ def extract_weight_class(text):
     return ""
 
 
-def find_section_label(text):
-    lower = normalize_whitespace(text).lower()
-    if "main card" in lower:
-        return "main"
-    if "early prelims" in lower:
-        return "early_prelims"
-    if "prelims" in lower:
-        return "prelims"
-    return None
-
-
 def pick_fight_detail_link(row):
     anchor = row.select_one('a[href*="fight-details"]')
     return anchor.get("href", "").strip() if anchor else None
 
 
 def extract_bout_fighters(row):
+    """
+    Extrait strictement les 2 noms de combattants depuis une vraie ligne UFC Stats.
+    """
+    fighter_links = row.select('a[href*="fighter-details"]')
     names = []
-    for anchor in row.select('a[href*="fighter-details"]'):
+
+    for anchor in fighter_links:
         name = normalize_whitespace(anchor.get_text(" ", strip=True))
         if name and name not in names:
             names.append(name)
 
-    if len(names) >= 2:
-        return names[:2]
+    if len(names) == 2:
+        return names
 
     cells = row.find_all("td")
-    fighter_like = []
-    for cell in cells:
-        text = normalize_whitespace(cell.get_text(" ", strip=True))
-        if re.search(r"[A-Za-z]", text) and len(text) > 2:
-            fighter_like.append(text)
+    if len(cells) < 2:
+        return []
 
-    if len(fighter_like) >= 2:
-        return fighter_like[:2]
+    fighter_cell = cells[1]
+    p_tags = fighter_cell.find_all("p")
+    candidate_names = []
+
+    for tag in p_tags:
+        text = normalize_whitespace(tag.get_text(" ", strip=True))
+        if not text:
+            continue
+
+        lower = text.lower()
+        if any(bad in lower for bad in ["view matchup", "view", "matchup", "fight", "perf", "bonus"]):
+            continue
+
+        if text not in candidate_names:
+            candidate_names.append(text)
+
+    if len(candidate_names) >= 2:
+        return candidate_names[:2]
 
     return []
+
+
+def is_valid_bout_row(row):
+    classes = row.get("class", [])
+    if "b-fight-details__table-row" not in classes:
+        return False
+
+    cols = row.find_all("td")
+    if len(cols) < 2:
+        return False
+
+    return True
 
 
 def load_fighter_index(supabase):
@@ -242,16 +271,19 @@ def load_fighter_index(supabase):
     normalized = {}
 
     for row in rows:
-        key = normalize_key(row["name"])
-        exact.setdefault(key, row["id"])
-        normalized.setdefault(key, row["id"])
+        exact_key = normalize_key(row["name"])
+        normalized_key = normalize_fighter_name_for_match(row["name"])
+
+        exact.setdefault(exact_key, row["id"])
+        normalized.setdefault(normalized_key, row["id"])
 
     return {"exact": exact, "normalized": normalized}
 
 
 def resolve_fighter_id(name, fighter_index):
-    key = normalize_key(name)
-    return fighter_index["exact"].get(key) or fighter_index["normalized"].get(key)
+    exact_key = normalize_key(name)
+    normalized_key = normalize_fighter_name_for_match(name)
+    return fighter_index["exact"].get(exact_key) or fighter_index["normalized"].get(normalized_key)
 
 
 def scrape_fight_detail(fight_url):
@@ -369,23 +401,42 @@ def scrape_event_page(supabase, fighter_index, source):
 
             bouts = []
             bout_order = 1
-            current_segment = "main"
+            rows = detail_soup.select("tr.b-fight-details__table-row")
 
-            for row in detail_soup.find_all("tr"):
+            for row in rows:
+                if not is_valid_bout_row(row):
+                    continue
+
                 row_text = normalize_whitespace(row.get_text(" ", strip=True))
                 if not row_text:
                     continue
 
-                section = find_section_label(row_text)
-                if section:
-                    current_segment = section
-                    continue
+                if bout_order <= 5:
+                    current_segment = "main"
+                elif bout_order <= 9:
+                    current_segment = "prelims"
+                else:
+                    current_segment = "early_prelims"
 
                 fighters = extract_bout_fighters(row)
-                if len(fighters) < 2:
+                if len(fighters) != 2:
                     continue
 
                 fighter_a_name, fighter_b_name = fighters[0], fighters[1]
+
+                banned_fragments = [
+                    "terms of use",
+                    "privacy policy",
+                    "all rights reserved",
+                    "navigation",
+                    "events & fights",
+                    "leaders",
+                    "bonuses",
+                ]
+                combined = f"{fighter_a_name} {fighter_b_name}".lower()
+                if any(fragment in combined for fragment in banned_fragments):
+                    continue
+
                 fight_url = pick_fight_detail_link(row)
                 fight_detail = None
 
