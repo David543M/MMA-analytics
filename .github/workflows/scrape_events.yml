@@ -12,7 +12,6 @@ concurrency:
 jobs:
   scrape-events:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
