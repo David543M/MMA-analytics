@@ -32,8 +32,8 @@ jobs:
             echo "Missing SUPABASE_URL secret"
             exit 1
           fi
-          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "Missing SUPABASE_SERVICE_ROLE_KEY secret"
+          if [ -z "$SUPABASE_KEY" ]; then
+            echo "Missing SUPABASE_KEY secret"
             exit 1
           fi
 
