@@ -55,5 +55,5 @@ jobs:
       - name: Scrape UFC events
         run: |
           echo "Starting UFC event scrape..."
-          python -u .github/workflows/scrape_events.py
+          python -u .github/scrape_events.py
           echo "UFC event scrape completed successfully."
