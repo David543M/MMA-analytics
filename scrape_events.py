@@ -108,6 +108,20 @@ def parse_location(value):
     if not text:
         return {"city": "", "country": ""}
 
+    lower = text.lower()
+    banned_fragments = [
+        "click on a row below",
+        "terms of use",
+        "privacy policy",
+        "all rights reserved",
+        "navigation",
+        "events & fights",
+        "stat leaders",
+        "bonus",
+    ]
+    if any(fragment in lower for fragment in banned_fragments):
+        return {"city": "", "country": ""}
+
     parts = [normalize_whitespace(part) for part in text.split(",") if normalize_whitespace(part)]
     if len(parts) >= 2:
         return {"city": parts[0], "country": ", ".join(parts[1:])}
@@ -138,25 +152,22 @@ def extract_event_title(soup):
 
 
 def extract_event_metadata(soup):
-    raw_text = soup.get_text("\n", strip=False)
-    text = normalize_whitespace(raw_text)
-    lines = [normalize_whitespace(line) for line in raw_text.splitlines() if normalize_whitespace(line)]
+    detail_items = soup.select(".b-list__box-list-item")
+    detail_text = " ".join(normalize_whitespace(item.get_text(" ", strip=True)) for item in detail_items)
+    date_value = parse_date(detail_text)
 
-    date_value = parse_date(text)
     venue = ""
     location = ""
 
-    venue_match = re.search(r"Venue:\s*(.+?)(?=Location:|Date:|$)", text, re.I)
-    if venue_match:
-        venue = normalize_whitespace(venue_match.group(1))
+    for item in detail_items:
+        item_text = normalize_whitespace(item.get_text(" ", strip=True))
+        lower = item_text.lower()
 
-    location_match = re.search(r"Location:\s*(.+?)(?=Venue:|Date:|$)", text, re.I)
-    if location_match:
-        location = normalize_whitespace(location_match.group(1))
+        if lower.startswith("venue:"):
+            venue = normalize_whitespace(re.split(r"venue:", item_text, flags=re.I)[1])
 
-    if not location:
-        candidate = next((line for line in lines if "," in line and not is_date_like(line) and len(line) < 80), "")
-        location = candidate
+        if lower.startswith("location:"):
+            location = normalize_whitespace(re.split(r"location:", item_text, flags=re.I)[1])
 
     parsed_location = parse_location(location)
 
@@ -211,9 +222,6 @@ def pick_fight_detail_link(row):
 
 
 def extract_bout_fighters(row):
-    """
-    Extrait strictement les 2 noms de combattants depuis une vraie ligne UFC Stats.
-    """
     fighter_links = row.select('a[href*="fighter-details"]')
     names = []
 
@@ -239,7 +247,18 @@ def extract_bout_fighters(row):
             continue
 
         lower = text.lower()
-        if any(bad in lower for bad in ["view matchup", "view", "matchup", "fight", "perf", "bonus"]):
+        if any(
+            bad in lower
+            for bad in [
+                "view matchup",
+                "matchup",
+                "terms of use",
+                "privacy policy",
+                "navigation",
+                "events & fights",
+                "bonus",
+            ]
+        ):
             continue
 
         if text not in candidate_names:
