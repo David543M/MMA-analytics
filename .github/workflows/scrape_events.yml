@@ -9,13 +9,17 @@ concurrency:
   group: scrape-ufc-events
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   scrape-events:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_KEY }}
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,6 +28,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Show runtime
+        run: |
+          echo "Python: $(python --version)"
+          echo "Pip: $(pip --version)"
 
       - name: Validate required secrets
         run: |
@@ -35,11 +44,16 @@ jobs:
             echo "Missing SUPABASE_KEY secret"
             exit 1
           fi
+          echo "Supabase URL: ${SUPABASE_URL}"
+          echo "Service role key: present"
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r .github/workflows/requirements.txt
 
       - name: Scrape UFC events
-        run: python scrape_events.py
+        run: |
+          echo "Starting UFC event scrape..."
+          python -u .github/workflows/scrape-events.py
+          echo "UFC event scrape completed successfully."
