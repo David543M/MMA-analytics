@@ -1,4 +1,5 @@
 name: Run MMA Scraper
+
 on:
   workflow_dispatch:
   schedule:
