@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from datetime import date
 
 import requests
 from bs4 import BeautifulSoup
@@ -101,6 +102,18 @@ def parse_date(value):
     day = match.group(2).zfill(2)
     year = match.group(3)
     return f"{year}-{month}-{day}"
+
+
+def resolve_event_status(event_date, source_status):
+    if not event_date:
+        return source_status
+
+    try:
+        parsed = date.fromisoformat(event_date)
+    except ValueError:
+        return source_status
+
+    return "scheduled" if parsed >= date.today() else "completed"
 
 
 def parse_location(value):
@@ -403,13 +416,14 @@ def scrape_event_page(supabase, fighter_index, source):
                 print(f"  skipping {event_name}: missing event date")
                 continue
 
+            event_status = resolve_event_status(event_date, source["status"])
             slug = f"{slugify(event_name)}-{event_date}"
 
             event_payload = {
                 "slug": slug,
                 "name": event_name,
                 "date": event_date,
-                "status": source["status"],
+                "status": event_status,
                 "venue": meta["venue"] or "",
                 "city": meta["city"] or "",
                 "country": meta["country"] or "",
@@ -491,7 +505,7 @@ def scrape_event_page(supabase, fighter_index, source):
                     "fighter_b_name": fighter_b_name,
                     "weight_class": extract_weight_class(row_text),
                     "is_title_fight": bool(re.search(r"title", row_text, re.I)),
-                    "status": "completed" if source["status"] == "completed" else "scheduled",
+                    "status": event_status,
                     "winner_corner": winner_corner,
                     "method": fight_detail["method"] if fight_detail else "",
                     "round": fight_detail["round"] if fight_detail else None,
@@ -524,3 +538,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
