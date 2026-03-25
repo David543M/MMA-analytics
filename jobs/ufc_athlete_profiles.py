@@ -239,7 +239,7 @@ def upsert_all(sb, cfg: dict[str, Any], payload: dict[str, Any]) -> None:
 
 
 async def main():
-    ccfg = load_config("config/ufc_athlete_profiles.yaml")
+    cfg = load_config("config/ufc_athlete_profiles.yaml")
     sb = get_supabase(cfg)
     fighters = fetch_fighters_to_process(sb, cfg["job"]["batch_size"])
 
