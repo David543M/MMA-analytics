@@ -61,7 +61,7 @@ mapping:
 
 supabase:
   url_env: "SUPABASE_URL"
-  service_role_key_env: "SUPABASE_SERVICE_ROLE_KEY"
+  service_role_key_env: "SUPABASE_KEY"
 
 targets:
   profile_table: "fighter_profiles"
