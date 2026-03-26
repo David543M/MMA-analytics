@@ -2,9 +2,11 @@ job:
   name: ufc_athlete_profiles
   enabled: true
   batch_size: 50
+  test_limit: 5
   delay_ms: 1200
   timeout_ms: 30000
   headless: true
+
 
 source:
   profile_url_template: "https://www.ufc.com/athlete/{slug}"
