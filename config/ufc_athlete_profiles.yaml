@@ -2,11 +2,10 @@ job:
   name: ufc_athlete_profiles
   enabled: true
   batch_size: 50
-  test_limit: 1
+  test_limit: 5
   delay_ms: 1200
   timeout_ms: 30000
   headless: true
-
 
 source:
   profile_url_template: "https://www.ufc.com/athlete/{slug}"
@@ -16,6 +15,7 @@ selectors:
     - "When and why did you start training for fighting?"
     - "What professional titles have you held?"
     - "Any accomplishments in amateur combat sports?"
+    - "Any belts/ ranks in grappling disciplines?"
     - "What has been your toughest fight to date and why?"
     - "Who is your favorite fighter and why?"
     - "What was your job before you started fighting?"
@@ -25,7 +25,7 @@ selectors:
 mapping:
   info:
     status: ["Status"]
-    place_of_birth: ["Place of Birth"]
+    place_of_birth: ["Place of Birth", "Hometown"]
     trains_at: ["Trains at", "Training"]
     fighting_style: ["Fighting style"]
     age: ["Age"]
@@ -71,4 +71,3 @@ debug:
   fighter_name: "Joby Sanchez"
   write_payload_file: true
   payload_file: "debug_ufc_payload.json"
-
