@@ -491,7 +491,7 @@ async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[st
     pairs = await extract_info_pairs(page)
     body_text = await extract_body_text(page)
     embedded_payloads = await extract_embedded_json_payloads(page)
-
+    
     result = {
         "profile": extract_profile_record(fighter, final_url, pairs, embedded_payloads, cfg),
         "stats": extract_stats_record(fighter, body_text, embedded_payloads, cfg),
@@ -509,6 +509,7 @@ async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[st
     is_valid, reason = validate_scrape_result(fighter, page_title, body_text, result, cfg)
     result["meta"]["valid"] = is_valid
     result["meta"]["validation_reason"] = reason
+    result["embedded_payloads_raw"] = embedded_payloads
     return result
 
 
@@ -622,6 +623,8 @@ async def main():
         for fighter in fighters:
             try:
                 result = await scrape_one(page, fighter, cfg)
+                maybe_write_debug_payload(cfg, fighter, result, result.pop("embedded_payloads_raw", []))
+
 
                 if not result["meta"]["valid"]:
                     print(
