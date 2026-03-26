@@ -35,5 +35,9 @@ mapping:
 
 supabase:
   url_env: "SUPABASE_URL"
-  service_role_key_env: "SUPABASE_KEY"
+  key_env: "SUPABASE_KEY"
 
+validation:
+  require_name_match: true
+  min_profile_fields: 2
+  min_stats_fields: 1
