@@ -33,3 +33,12 @@ jobs:
       - name: Run UFC athlete profile sync
         run: |
           python jobs/ufc_athlete_profiles.py
+
+              - name: Upload debug payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ufc-debug-payload
+          path: debug_ufc_payload.json
+          if-no-files-found: ignore
+
