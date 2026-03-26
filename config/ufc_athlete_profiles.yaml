@@ -1,43 +1,35 @@
-job:
-  name: ufc_athlete_profiles
-  enabled: true
-  batch_size: 50
-  delay_ms: 1200
-  timeout_ms: 30000
-  headless: true
+name: UFC Athlete Profiles
 
-source:
-  profile_url_template: "https://www.ufc.com/athlete/{slug}"
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
 
-selectors:
-  qa_question_candidates:
-    - "When and why did you start training for fighting?"
-    - "What professional titles have you held?"
-    - "Any accomplishments in amateur combat sports?"
-    - "What has been your toughest fight to date and why?"
-    - "Who is your favorite fighter and why?"
-    - "What was your job before you started fighting?"
-    - "Personal Life / Background"
-    - "Personal Life/Background"
+jobs:
+  sync-ufc-athlete-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-mapping:
-  info:
-    status: ["Status"]
-    place_of_birth: ["Place of Birth"]
-    trains_at: ["Trains at", "Training"]
-    fighting_style: ["Fighting style"]
-    age: ["Age"]
-    height: ["Height"]
-    weight: ["Weight"]
-    octagon_debut: ["Octagon Debut"]
-    reach: ["Reach"]
-    leg_reach: ["Leg reach", "Leg Reach"]
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
-supabase:
-  url_env: "SUPABASE_URL"
-  key_env: "SUPABASE_KEY"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-validation:
-  require_name_match: true
-  min_profile_fields: 2
-  min_stats_fields: 1
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml playwright supabase
+          python -m playwright install chromium
+
+      - name: Run UFC athlete profile sync
+        run: |
+          python jobs/ufc_athlete_profiles.py
