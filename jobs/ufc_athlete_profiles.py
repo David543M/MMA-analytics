@@ -580,6 +580,10 @@ async def main():
     sb = get_supabase(cfg)
     fighters = fetch_fighter_seeds(sb, cfg["job"]["batch_size"])
 
+    test_limit = cfg["job"].get("test_limit")
+    if isinstance(test_limit, int) and test_limit > 0:
+        fighters = fighters[:test_limit]
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=cfg["job"].get("headless", True))
         page = await browser.new_page()
