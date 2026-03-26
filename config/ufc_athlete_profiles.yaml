@@ -1,35 +1,65 @@
-name: UFC Athlete Profiles
+job:
+  name: ufc_athlete_profiles
+  enabled: true
+  batch_size: 50
+  delay_ms: 1200
+  timeout_ms: 30000
+  headless: true
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * 1"
+source:
+  profile_url_template: "https://www.ufc.com/athlete/{slug}"
 
-jobs:
-  sync-ufc-athlete-profiles:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+selectors:
+  qa_question_candidates:
+    - "When and why did you start training for fighting?"
+    - "What professional titles have you held?"
+    - "Any accomplishments in amateur combat sports?"
+    - "What has been your toughest fight to date and why?"
+    - "Who is your favorite fighter and why?"
+    - "What was your job before you started fighting?"
+    - "Personal Life / Background"
+    - "Personal Life/Background"
 
-    env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+mapping:
+  info:
+    status: ["Status"]
+    place_of_birth: ["Place of Birth"]
+    trains_at: ["Trains at", "Training"]
+    fighting_style: ["Fighting style"]
+    age: ["Age"]
+    height: ["Height"]
+    weight: ["Weight"]
+    octagon_debut: ["Octagon Debut"]
+    reach: ["Reach"]
+    leg_reach: ["Leg reach", "Leg Reach"]
+  json:
+    status: ["status"]
+    place_of_birth: ["place_of_birth", "placeOfBirth", "birth_place", "birthPlace"]
+    trains_at: ["trains_at", "trainsAt", "training"]
+    fighting_style: ["fighting_style", "fightingStyle", "style"]
+    age: ["age"]
+    height: ["height"]
+    weight: ["weight"]
+    octagon_debut: ["octagon_debut", "octagonDebut", "debut"]
+    reach: ["reach"]
+    leg_reach: ["leg_reach", "legReach"]
+    wins_by_ko: ["wins_by_ko", "winsByKo", "wins_by_knockout", "winsByKnockout"]
+    wins_by_submission: ["wins_by_submission", "winsBySubmission"]
+    first_round_finishes: ["first_round_finishes", "firstRoundFinishes"]
+    sig_strikes_landed: ["sig_strikes_landed", "sigStrikesLanded"]
+    sig_strikes_attempted: ["sig_strikes_attempted", "sigStrikesAttempted"]
+    takedowns_landed: ["takedowns_landed", "takedownsLanded"]
+    takedowns_attempted: ["takedowns_attempted", "takedownsAttempted"]
+    slpm: ["slpm", "sig_str_landed_per_min", "sigStrLandedPerMin"]
+    sapm: ["sapm", "sig_str_absorbed_per_min", "sigStrAbsorbedPerMin"]
+    td_avg: ["td_avg", "takedown_avg", "takedownAvg"]
+    sub_avg: ["sub_avg", "submission_avg", "submissionAvg"]
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+supabase:
+  url_env: "SUPABASE_URL"
+  key_env: "SUPABASE_KEY"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml playwright supabase
-          python -m playwright install chromium
-
-      - name: Run UFC athlete profile sync
-        run: |
-          python jobs/ufc_athlete_profiles.py
+validation:
+  require_name_match: true
+  min_profile_fields: 2
+  min_stats_fields: 1
