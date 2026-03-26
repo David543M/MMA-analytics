@@ -570,6 +570,37 @@ def replace_fight_history_rows(sb: Client, fighter_id: str, rows: list[dict[str,
     if rows:
         sb.table("fighter_ufc_fight_history").insert(rows).execute()
 
+def maybe_write_debug_payload(cfg: dict[str, Any], fighter: FighterSeed, result: dict[str, Any], payloads: list[Any]) -> None:
+    debug_cfg = cfg.get("debug", {})
+    if not debug_cfg.get("enabled", False):
+        return
+
+    target_name = debug_cfg.get("fighter_name")
+    if target_name and fighter.name.lower() != target_name.lower():
+        return
+
+    if not debug_cfg.get("write_payload_file", True):
+        return
+
+    output_path = debug_cfg.get("payload_file", "debug_ufc_payload.json")
+    debug_blob = {
+        "fighter": {
+            "fighter_id": fighter.fighter_id,
+            "name": fighter.name,
+            "slug": fighter.slug,
+        },
+        "meta": result["meta"],
+        "profile": result["profile"],
+        "stats": result["stats"],
+        "qa_rows_count": len(result["qa_rows"]),
+        "history_rows_count": len(result["history_rows"]),
+        "embedded_payloads": payloads,
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(debug_blob, f, ensure_ascii=False, indent=2)
+
+
 
 async def main():
     cfg = load_config("config/ufc_athlete_profiles.yaml")
