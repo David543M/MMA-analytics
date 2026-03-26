@@ -61,7 +61,20 @@ def normalize_key(value: str | None) -> str:
 
 def load_config(path: str = "config/ufc_athlete_profiles.yaml") -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
+
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Invalid YAML config at {path}: expected a mapping at the root")
+
+    required_keys = {"job", "source", "supabase"}
+    missing = required_keys - set(cfg.keys())
+    if missing:
+        raise ValueError(
+            f"Invalid config at {path}: missing top-level keys {sorted(missing)}. "
+            f"Found: {sorted(cfg.keys())}"
+        )
+
+    return cfg
 
 
 def get_supabase(cfg: dict[str, Any]) -> Client:
@@ -78,7 +91,7 @@ def parse_int(value: str | int | float | None) -> int | None:
         return value
     if isinstance(value, float):
         return int(value)
-    match = re.search(r"(-?\d+)", value.replace(",", ""))
+    match = re.search(r"(-?\d+)", str(value).replace(",", ""))
     return int(match.group(1)) if match else None
 
 
@@ -87,7 +100,7 @@ def parse_numeric(value: str | int | float | None) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    match = re.search(r"(-?\d+(?:\.\d+)?)", value.replace(",", ""))
+    match = re.search(r"(-?\d+(?:\.\d+)?)", str(value).replace(",", ""))
     return float(match.group(1)) if match else None
 
 
@@ -416,6 +429,13 @@ def names_look_related(expected: str, actual: str | None) -> bool:
     return len(overlap) >= max(1, min(len(expected_tokens), 2))
 
 
+def slug_matches_fighter(expected_name: str, final_url: str) -> bool:
+    final_slug = extract_slug_from_url(final_url)
+    if not final_slug:
+        return False
+    return final_slug == slugify(expected_name)
+
+
 def count_meaningful_fields(payload: dict[str, Any], ignored_keys: set[str]) -> int:
     return sum(1 for key, value in payload.items() if key not in ignored_keys and value not in (None, "", []))
 
@@ -432,12 +452,19 @@ def validate_scrape_result(
     min_profile_fields = validation_cfg.get("min_profile_fields", 2)
     min_stats_fields = validation_cfg.get("min_stats_fields", 1)
 
+    final_url = result["meta"]["final_url"]
+
     if require_name_match:
         body_window = normalize_inline_text(body_text[:5000])
         title_match = names_look_related(fighter.name, page_title)
         body_match = names_look_related(fighter.name, body_window)
-        if not title_match and not body_match:
+        slug_match = fighter.slug == extract_slug_from_url(final_url) if fighter.slug else slug_matches_fighter(fighter.name, final_url)
+
+        if not slug_match and not title_match and not body_match:
             return False, "page did not validate against fighter name"
+
+        if fighter.slug is None and not slug_match:
+            return False, "final UFC slug does not match expected fighter"
 
     profile_count = count_meaningful_fields(result["profile"], {"fighter_id", "source_url", "updated_at"})
     stats_count = count_meaningful_fields(result["stats"], {"fighter_id", "updated_at"})
