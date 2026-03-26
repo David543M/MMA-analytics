@@ -38,7 +38,8 @@ def load_config(path: str = "config/ufc_athlete_profiles.yaml") -> dict[str, Any
 
 def get_supabase(cfg: dict[str, Any]) -> Client:
     url = os.environ[cfg["supabase"]["url_env"]]
-    key = os.environ[cfg["supabase"]["service_role_key_env"]]
+    key_env = cfg["supabase"].get("key_env") or cfg["supabase"].get("service_role_key_env") or "SUPABASE_KEY"
+    key = os.environ[key_env]
     return create_client(url, key)
 
 
@@ -138,7 +139,12 @@ def match_alias(pairs: dict[str, str], aliases: list[str]) -> str | None:
     return None
 
 
-def extract_profile_record(fighter: FighterSeed, source_url: str, pairs: dict[str, str], cfg: dict[str, Any]) -> dict[str, Any]:
+def extract_profile_record(
+    fighter: FighterSeed,
+    source_url: str,
+    pairs: dict[str, str],
+    cfg: dict[str, Any],
+) -> dict[str, Any]:
     info_map = cfg["mapping"]["info"]
 
     return {
@@ -205,8 +211,10 @@ def extract_qa_rows(fighter: FighterSeed, body_text: str, cfg: dict[str, Any]) -
     questions = cfg["selectors"]["qa_question_candidates"]
     rows: list[dict[str, Any]] = []
 
+    escaped_questions = "|".join(re.escape(q) for q in questions)
+
     for index, question in enumerate(questions):
-        pattern = rf"{re.escape(question)}\s*(.+?)(?=(?:{'|'.join(re.escape(q) for q in questions)})|$)"
+        pattern = rf"{re.escape(question)}\s*(.+?)(?=(?:{escaped_questions})|$)"
         match = re.search(pattern, body_text, flags=re.IGNORECASE | re.DOTALL)
         if not match:
             continue
@@ -247,7 +255,7 @@ def extract_fight_history_rows(fighter: FighterSeed, body_text: str) -> list[dic
 
         result_match = re.search(r"\b(win|loss|draw|nc|no contest)\b", chunk, flags=re.IGNORECASE)
         if result_match:
-            result = result_match.group(1)
+            result = result_match.group(1).lower()
 
         round_match = re.search(r"\bR(?:ound)?\s*(\d+)\b", chunk, flags=re.IGNORECASE)
         if round_match:
@@ -292,36 +300,98 @@ def extract_fight_history_rows(fighter: FighterSeed, body_text: str) -> list[dic
     return rows
 
 
+def names_look_related(expected: str, actual: str | None) -> bool:
+    if not expected or not actual:
+        return False
+
+    expected_tokens = {t for t in re.findall(r"[a-z0-9]+", expected.lower()) if len(t) > 2}
+    actual_tokens = {t for t in re.findall(r"[a-z0-9]+", actual.lower()) if len(t) > 2}
+
+    if not expected_tokens or not actual_tokens:
+        return False
+
+    overlap = expected_tokens & actual_tokens
+    return len(overlap) >= max(1, min(len(expected_tokens), 2))
+
+
+def count_meaningful_profile_fields(profile: dict[str, Any]) -> int:
+    ignored_keys = {"fighter_id", "source_url", "updated_at"}
+    return sum(1 for key, value in profile.items() if key not in ignored_keys and value not in (None, "", []))
+
+
+def count_meaningful_stats(stats: dict[str, Any]) -> int:
+    ignored_keys = {"fighter_id", "updated_at"}
+    return sum(1 for key, value in stats.items() if key not in ignored_keys and value not in (None, "", []))
+
+
+def validate_scrape_result(
+    fighter: FighterSeed,
+    page_title: str | None,
+    body_text: str,
+    result: dict[str, Any],
+    cfg: dict[str, Any],
+) -> tuple[bool, str]:
+    validation_cfg = cfg.get("validation", {})
+    require_name_match = validation_cfg.get("require_name_match", True)
+    min_profile_fields = validation_cfg.get("min_profile_fields", 2)
+    min_stats_fields = validation_cfg.get("min_stats_fields", 1)
+
+    body_window = body_text[:5000]
+
+    if require_name_match:
+        title_match = names_look_related(fighter.name, page_title)
+        body_match = names_look_related(fighter.name, body_window)
+        if not title_match and not body_match:
+            return False, "page did not validate against fighter name"
+
+    profile_count = count_meaningful_profile_fields(result["profile"])
+    stats_count = count_meaningful_stats(result["stats"])
+    qa_count = len(result["qa_rows"])
+    history_count = len(result["history_rows"])
+
+    if profile_count < min_profile_fields and stats_count < min_stats_fields and qa_count == 0 and history_count == 0:
+        return False, "no meaningful data extracted"
+
+    return True, (
+        f"profile_fields={profile_count} "
+        f"stats_fields={stats_count} "
+        f"qa_rows={qa_count} "
+        f"history_rows={history_count}"
+    )
+
+
 async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[str, Any]:
     url = build_profile_url(fighter, cfg)
-    await page.goto(url, wait_until="networkidle", timeout=cfg["job"]["timeout_ms"])
+    response = await page.goto(url, wait_until="networkidle", timeout=cfg["job"]["timeout_ms"])
 
+    final_url = page.url
+    page_title = normalize_text(await page.title())
     pairs = await extract_info_pairs(page)
     body_text = await extract_body_text(page)
 
-    profile = extract_profile_record(fighter, url, pairs, cfg)
-    stats = extract_stats_record(fighter, body_text)
-    qa_rows = extract_qa_rows(fighter, body_text, cfg)
-    history_rows = extract_fight_history_rows(fighter, body_text)
-
-    return {
-        "profile": profile,
-        "stats": stats,
-        "qa_rows": qa_rows,
-        "history_rows": history_rows,
+    result = {
+        "profile": extract_profile_record(fighter, final_url, pairs, cfg),
+        "stats": extract_stats_record(fighter, body_text),
+        "qa_rows": extract_qa_rows(fighter, body_text, cfg),
+        "history_rows": extract_fight_history_rows(fighter, body_text),
+        "meta": {
+            "requested_url": url,
+            "final_url": final_url,
+            "page_title": page_title,
+            "status_code": response.status if response else None,
+        },
     }
+
+    is_valid, reason = validate_scrape_result(fighter, page_title, body_text, result, cfg)
+    result["meta"]["valid"] = is_valid
+    result["meta"]["validation_reason"] = reason
+    return result
 
 
 def fetch_fighter_seeds(sb: Client, limit: int) -> list[FighterSeed]:
     response = sb.table("fighters").select("id,name").limit(limit).execute()
     data = response.data or []
-    return [
-        FighterSeed(
-            fighter_id=row["id"],
-            name=row["name"],
-        )
-        for row in data
-    ]
+    return [FighterSeed(fighter_id=row["id"], name=row["name"]) for row in data]
 
 
 def upsert_profile(sb: Client, row: dict[str, Any]) -> None:
@@ -357,12 +427,26 @@ async def main():
             try:
                 result = await scrape_one(page, fighter, cfg)
 
-                upsert_profile(sb, result["profile"])
-                upsert_stats(sb, result["stats"])
-                replace_qa_rows(sb, fighter.fighter_id, result["qa_rows"])
-                replace_fight_history_rows(sb, fighter.fighter_id, result["history_rows"])
+                if not result["meta"]["valid"]:
+                    print(
+                        f"[SKIP] {fighter.name} | "
+                        f"title={result['meta']['page_title']} | "
+                        f"url={result['meta']['final_url']} | "
+                        f"reason={result['meta']['validation_reason']}"
+                    )
+                else:
+                    upsert_profile(sb, result["profile"])
+                    upsert_stats(sb, result["stats"])
+                    replace_qa_rows(sb, fighter.fighter_id, result["qa_rows"])
+                    replace_fight_history_rows(sb, fighter.fighter_id, result["history_rows"])
 
-                print(f"[OK] {fighter.name}")
+                    print(
+                        f"[OK] {fighter.name} | "
+                        f"title={result['meta']['page_title']} | "
+                        f"url={result['meta']['final_url']} | "
+                        f"{result['meta']['validation_reason']}"
+                    )
+
             except PlaywrightTimeoutError:
                 print(f"[TIMEOUT] {fighter.name}")
             except Exception as exc:
