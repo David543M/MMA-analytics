@@ -65,3 +65,10 @@ validation:
   require_name_match: true
   min_profile_fields: 2
   min_stats_fields: 1
+
+debug:
+  enabled: true
+  fighter_name: "Joby Sanchez"
+  write_payload_file: true
+  payload_file: "debug_ufc_payload.json"
+
