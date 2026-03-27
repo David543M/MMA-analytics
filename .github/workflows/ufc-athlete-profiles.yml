@@ -8,7 +8,7 @@ on:
 jobs:
   sync-ufc-athlete-profiles:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 0
 
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
