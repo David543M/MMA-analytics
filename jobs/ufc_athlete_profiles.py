@@ -146,10 +146,54 @@ def find_value_in_json(payloads: list[Any], aliases: list[str]) -> Any | None:
     return None
 
 
+def count_meaningful_fields(payload: dict[str, Any], ignored_keys: set[str]) -> int:
+    return sum(1 for key, value in payload.items() if key not in ignored_keys and value not in (None, "", []))
+
+
+def names_look_related(expected: str, actual: str | None) -> bool:
+    if not expected or not actual:
+        return False
+
+    expected_tokens = {token for token in re.findall(r"[a-z0-9]+", expected.lower()) if len(token) > 2}
+    actual_tokens = {token for token in re.findall(r"[a-z0-9]+", actual.lower()) if len(token) > 2}
+
+    if not expected_tokens or not actual_tokens:
+        return False
+
+    overlap = expected_tokens & actual_tokens
+    return len(overlap) >= max(1, min(len(expected_tokens), 2))
+
+
+def slug_matches_fighter(expected_name: str, final_url: str) -> bool:
+    final_slug = extract_slug_from_url(final_url)
+    if not final_slug:
+        return False
+    return final_slug == slugify(expected_name)
+
+
+async def safe_text(locator) -> str | None:
+    try:
+        if await locator.count() == 0:
+            return None
+        return normalize_inline_text(await locator.first.text_content())
+    except Exception:
+        return None
+
+
+async def safe_all_texts(locator) -> list[str]:
+    try:
+        if await locator.count() == 0:
+            return []
+        values = await locator.all_text_contents()
+        return [value for value in (normalize_inline_text(v) for v in values) if value]
+    except Exception:
+        return []
+
+
 async def extract_embedded_json_payloads(page) -> list[Any]:
     payloads: list[Any] = []
 
-    for raw_text in await page.locator("script[type='application/ld+json']").all_inner_texts():
+    for raw_text in await page.locator("script[type='application/ld+json']").all_text_contents():
         text = raw_text.strip()
         if not text:
             continue
@@ -160,7 +204,7 @@ async def extract_embedded_json_payloads(page) -> list[Any]:
 
     next_data = page.locator("script#__NEXT_DATA__")
     if await next_data.count():
-        text = (await next_data.first.inner_text()).strip()
+        text = (await next_data.first.text_content() or "").strip()
         if text:
             try:
                 payloads.append(json.loads(text))
@@ -179,14 +223,8 @@ async def extract_dom_profile_fields(page) -> dict[str, str]:
 
     containers = await page.locator(".c-bio__field").all()
     for container in containers:
-        label_locator = container.locator(".c-bio__label")
-        text_locator = container.locator(".c-bio__text")
-
-        if not await label_locator.count() or not await text_locator.count():
-            continue
-
-        label = normalize_inline_text(await label_locator.first.inner_text())
-        value = normalize_inline_text(await text_locator.first.inner_text())
+        label = await safe_text(container.locator(".c-bio__label"))
+        value = await safe_text(container.locator(".c-bio__text"))
 
         if label and value:
             fields[label] = value
@@ -238,10 +276,7 @@ def extract_profile_record(
     }
 
 
-def extract_basic_stats_record(
-    fighter: FighterSeed,
-    body_text: str,
-) -> dict[str, Any]:
+def extract_basic_stats_record(fighter: FighterSeed, body_text: str) -> dict[str, Any]:
     flat_text = normalize_inline_text(body_text) or ""
     patterns = {
         "wins_by_ko": r"(\d+)\s+wins?\s+by\s+knockout",
@@ -284,21 +319,6 @@ def extract_basic_stats_record(
     return record
 
 
-def extract_label_value_pairs(container_text: str) -> list[tuple[str, str]]:
-    lines = [normalize_inline_text(line) for line in container_text.splitlines()]
-    lines = [line for line in lines if line]
-    pairs: list[tuple[str, str]] = []
-
-    i = 0
-    while i < len(lines) - 1:
-        label = lines[i]
-        value = lines[i + 1]
-        pairs.append((label, value))
-        i += 2
-
-    return pairs
-
-
 async def extract_advanced_stats_record(page, fighter: FighterSeed) -> dict[str, Any]:
     record = {
         "fighter_id": fighter.fighter_id,
@@ -329,136 +349,122 @@ async def extract_advanced_stats_record(page, fighter: FighterSeed) -> dict[str,
         "updated_at": now_iso(),
     }
 
-    striking_title = page.locator("h2.e-t3", has_text="Striking accuracy")
-    if await striking_title.count():
-        wrapper = striking_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
-        percent_text = normalize_inline_text(await wrapper.locator(".e-chart-circle__percent").first.inner_text()) if await wrapper.locator(".e-chart-circle__percent").count() else None
-        record["striking_accuracy_pct"] = parse_numeric(percent_text)
-        pairs = extract_label_value_pairs(await wrapper.inner_text())
-        for label, value in pairs:
-            normalized = normalize_key(label)
-            if normalized == "sigstrikeslanded":
-                record["sig_str_standing_landed"] = record["sig_str_standing_landed"]
-            if normalized == "sigstrikeslanded":
-                pass
+    try:
+        striking_title = page.locator("h2.e-t3", has_text=re.compile(r"striking accuracy", re.I))
+        if await striking_title.count():
+            wrapper = striking_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
+            record["striking_accuracy_pct"] = parse_numeric(
+                await safe_text(wrapper.locator(".e-chart-circle__percent"))
+            )
+    except Exception:
+        pass
 
-    takedown_title = page.locator("h2.e-t3", has_text="Takedown Accuracy")
-    if await takedown_title.count():
-        wrapper = takedown_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
-        percent_text = normalize_inline_text(await wrapper.locator(".e-chart-circle__percent").first.inner_text()) if await wrapper.locator(".e-chart-circle__percent").count() else None
-        record["takedown_accuracy_pct"] = parse_numeric(percent_text)
+    try:
+        takedown_title = page.locator("h2.e-t3", has_text=re.compile(r"takedown accuracy", re.I))
+        if await takedown_title.count():
+            wrapper = takedown_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
+            record["takedown_accuracy_pct"] = parse_numeric(
+                await safe_text(wrapper.locator(".e-chart-circle__percent"))
+            )
+    except Exception:
+        pass
 
-    compare_groups = await page.locator(".c-stat-compare").all()
-    for group in compare_groups:
-        labels = await group.locator(".c-stat-compare__label").all_inner_texts()
-        numbers = await group.locator(".c-stat-compare__number").all_inner_texts()
-        suffixes = await group.locator(".c-stat-compare__label-suffix").all_inner_texts()
+    try:
+        compare_groups = await page.locator(".c-stat-compare").all()
+        for group in compare_groups:
+            labels = await safe_all_texts(group.locator(".c-stat-compare__label"))
+            numbers = await safe_all_texts(group.locator(".c-stat-compare__number"))
 
-        for idx, label in enumerate(labels):
-            value = normalize_inline_text(numbers[idx]) if idx < len(numbers) else None
-            normalized = normalize_key(label)
+            for idx, label in enumerate(labels):
+                value = numbers[idx] if idx < len(numbers) else None
+                normalized = normalize_key(label)
 
-            if normalized == "sigstrdefense":
-                record["sig_str_defense_pct"] = parse_numeric(value)
-            elif normalized == "takedowndefense":
-                record["takedown_defense_pct"] = parse_numeric(value)
-            elif normalized == "knockdownavg":
-                record["knockdown_avg"] = parse_numeric(value)
-            elif normalized == "averagefighttime":
-                record["average_fight_time"] = value
+                if normalized == "sigstrdefense":
+                    record["sig_str_defense_pct"] = parse_numeric(value)
+                elif normalized == "takedowndefense":
+                    record["takedown_defense_pct"] = parse_numeric(value)
+                elif normalized == "knockdownavg":
+                    record["knockdown_avg"] = parse_numeric(value)
+                elif normalized == "averagefighttime":
+                    record["average_fight_time"] = value
+    except Exception:
+        pass
 
-    position_title = page.locator("h2.c-stat-3bar__title", has_text="Sig. Str. By Position")
-    if await position_title.count():
-        wrapper = position_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
-        groups = await wrapper.locator(".c-stat-3bar__group").all()
-        for group in groups:
-            label = normalize_inline_text(await group.locator(".c-stat-3bar__label").first.inner_text()) if await group.locator(".c-stat-3bar__label").count() else None
-            value = normalize_inline_text(await group.locator(".c-stat-3bar__value").first.inner_text()) if await group.locator(".c-stat-3bar__value").count() else None
-            if not label or not value:
-                continue
-            match = re.search(r"(\d+)\s*\(([\d\.]+)%\)", value)
-            if not match:
-                continue
-            landed = parse_int(match.group(1))
-            pct = parse_numeric(match.group(2))
-            normalized = normalize_key(label)
-            if normalized == "standing":
-                record["sig_str_standing_landed"] = landed
-                record["sig_str_standing_pct"] = pct
-            elif normalized == "clinch":
-                record["sig_str_clinch_landed"] = landed
-                record["sig_str_clinch_pct"] = pct
-            elif normalized == "ground":
-                record["sig_str_ground_landed"] = landed
-                record["sig_str_ground_pct"] = pct
+    try:
+        position_title = page.locator("h2.c-stat-3bar__title", has_text=re.compile(r"sig\.\s*str\.\s*by position", re.I))
+        if await position_title.count():
+            wrapper = position_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
+            groups = await wrapper.locator(".c-stat-3bar__group").all()
 
-    target_wrapper = page.locator(".c-stat-body")
-    if await target_wrapper.count():
-        head_value = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_head_value").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_head_value").count() else None
-        head_pct = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_head_percent").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_head_percent").count() else None
-        body_value = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_body_value").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_body_value").count() else None
-        body_pct = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_body_percent").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_body_percent").count() else None
-        leg_value = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_leg_value").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_leg_value").count() else None
-        leg_pct = normalize_inline_text(await page.locator("#e-stat-body_x5F__x5F_leg_percent").first.inner_text()) if await page.locator("#e-stat-body_x5F__x5F_leg_percent").count() else None
+            for group in groups:
+                label = await safe_text(group.locator(".c-stat-3bar__label"))
+                value = await safe_text(group.locator(".c-stat-3bar__value"))
+                if not label or not value:
+                    continue
 
-        record["sig_str_head_landed"] = parse_int(head_value)
-        record["sig_str_head_pct"] = parse_numeric(head_pct)
-        record["sig_str_body_landed"] = parse_int(body_value)
-        record["sig_str_body_pct"] = parse_numeric(body_pct)
-        record["sig_str_leg_landed"] = parse_int(leg_value)
-        record["sig_str_leg_pct"] = parse_numeric(leg_pct)
+                match = re.search(r"(\d+)\s*\(([\d\.]+)%\)", value)
+                if not match:
+                    continue
 
-    method_title = page.locator("h2.c-stat-3bar__title", has_text="Win by Method")
-    if await method_title.count():
-        wrapper = method_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
-        groups = await wrapper.locator(".c-stat-3bar__group").all()
-        for group in groups:
-            label = normalize_inline_text(await group.locator(".c-stat-3bar__label").first.inner_text()) if await group.locator(".c-stat-3bar__label").count() else None
-            value = normalize_inline_text(await group.locator(".c-stat-3bar__value").first.inner_text()) if await group.locator(".c-stat-3bar__value").count() else None
-            if not label or not value:
-                continue
-            match = re.search(r"(\d+)\s*\(([\d\.]+)%\)", value)
-            if not match:
-                continue
-            count = parse_int(match.group(1))
-            pct = parse_numeric(match.group(2))
-            normalized = normalize_key(label)
-            if normalized in {"kotko", "ko", "tko"}:
-                record["win_by_ko_tko_count"] = count
-                record["win_by_ko_tko_pct"] = pct
-            elif normalized in {"dec", "decision"}:
-                record["win_by_dec_count"] = count
-                record["win_by_dec_pct"] = pct
-            elif normalized in {"sub", "submission"}:
-                record["win_by_sub_count"] = count
-                record["win_by_sub_pct"] = pct
+                landed = parse_int(match.group(1))
+                pct = parse_numeric(match.group(2))
+                normalized = normalize_key(label)
+
+                if normalized == "standing":
+                    record["sig_str_standing_landed"] = landed
+                    record["sig_str_standing_pct"] = pct
+                elif normalized == "clinch":
+                    record["sig_str_clinch_landed"] = landed
+                    record["sig_str_clinch_pct"] = pct
+                elif normalized == "ground":
+                    record["sig_str_ground_landed"] = landed
+                    record["sig_str_ground_pct"] = pct
+    except Exception:
+        pass
+
+    try:
+        record["sig_str_head_landed"] = parse_int(await safe_text(page.locator("#e-stat-body_x5F__x5F_head_value")))
+        record["sig_str_head_pct"] = parse_numeric(await safe_text(page.locator("#e-stat-body_x5F__x5F_head_percent")))
+        record["sig_str_body_landed"] = parse_int(await safe_text(page.locator("#e-stat-body_x5F__x5F_body_value")))
+        record["sig_str_body_pct"] = parse_numeric(await safe_text(page.locator("#e-stat-body_x5F__x5F_body_percent")))
+        record["sig_str_leg_landed"] = parse_int(await safe_text(page.locator("#e-stat-body_x5F__x5F_leg_value")))
+        record["sig_str_leg_pct"] = parse_numeric(await safe_text(page.locator("#e-stat-body_x5F__x5F_leg_percent")))
+    except Exception:
+        pass
+
+    try:
+        method_title = page.locator("h2.c-stat-3bar__title", has_text=re.compile(r"win by method", re.I))
+        if await method_title.count():
+            wrapper = method_title.first.locator("xpath=ancestor::div[contains(@class,'stats-records-inner')][1]")
+            groups = await wrapper.locator(".c-stat-3bar__group").all()
+
+            for group in groups:
+                label = await safe_text(group.locator(".c-stat-3bar__label"))
+                value = await safe_text(group.locator(".c-stat-3bar__value"))
+                if not label or not value:
+                    continue
+
+                match = re.search(r"(\d+)\s*\(([\d\.]+)%\)", value)
+                if not match:
+                    continue
+
+                count = parse_int(match.group(1))
+                pct = parse_numeric(match.group(2))
+                normalized = normalize_key(label)
+
+                if normalized in {"kotko", "ko", "tko"}:
+                    record["win_by_ko_tko_count"] = count
+                    record["win_by_ko_tko_pct"] = pct
+                elif normalized in {"dec", "decision"}:
+                    record["win_by_dec_count"] = count
+                    record["win_by_dec_pct"] = pct
+                elif normalized in {"sub", "submission"}:
+                    record["win_by_sub_count"] = count
+                    record["win_by_sub_pct"] = pct
+    except Exception:
+        pass
 
     return record
-
-
-def names_look_related(expected: str, actual: str | None) -> bool:
-    if not expected or not actual:
-        return False
-
-    expected_tokens = {token for token in re.findall(r"[a-z0-9]+", expected.lower()) if len(token) > 2}
-    actual_tokens = {token for token in re.findall(r"[a-z0-9]+", actual.lower()) if len(token) > 2}
-
-    if not expected_tokens or not actual_tokens:
-        return False
-
-    overlap = expected_tokens & actual_tokens
-    return len(overlap) >= max(1, min(len(expected_tokens), 2))
-
-
-def slug_matches_fighter(expected_name: str, final_url: str) -> bool:
-    final_slug = extract_slug_from_url(final_url)
-    if not final_slug:
-        return False
-    return final_slug == slugify(expected_name)
-
-
-def count_meaningful_fields(payload: dict[str, Any], ignored_keys: set[str]) -> int:
-    return sum(1 for key, value in payload.items() if key not in ignored_keys and value not in (None, "", []))
 
 
 def validate_scrape_result(
