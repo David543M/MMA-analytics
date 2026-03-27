@@ -22,28 +22,6 @@ mapping:
     octagon_debut: ["Octagon Debut"]
     reach: ["Reach"]
     leg_reach: ["Leg reach", "Leg Reach"]
-  json:
-    status: ["status"]
-    place_of_birth: ["place_of_birth", "placeOfBirth", "birth_place", "birthPlace"]
-    trains_at: ["trains_at", "trainsAt", "training"]
-    fighting_style: ["fighting_style", "fightingStyle", "style"]
-    age: ["age"]
-    height: ["height"]
-    weight: ["weight"]
-    octagon_debut: ["octagon_debut", "octagonDebut", "debut"]
-    reach: ["reach"]
-    leg_reach: ["leg_reach", "legReach"]
-    wins_by_ko: ["wins_by_ko", "winsByKo", "wins_by_knockout", "winsByKnockout"]
-    wins_by_submission: ["wins_by_submission", "winsBySubmission"]
-    first_round_finishes: ["first_round_finishes", "firstRoundFinishes"]
-    sig_strikes_landed: ["sig_strikes_landed", "sigStrikesLanded"]
-    sig_strikes_attempted: ["sig_strikes_attempted", "sigStrikesAttempted"]
-    takedowns_landed: ["takedowns_landed", "takedownsLanded"]
-    takedowns_attempted: ["takedowns_attempted", "takedownsAttempted"]
-    slpm: ["slpm", "sig_str_landed_per_min", "sigStrLandedPerMin"]
-    sapm: ["sapm", "sig_str_absorbed_per_min", "sigStrAbsorbedPerMin"]
-    td_avg: ["td_avg", "takedown_avg", "takedownAvg"]
-    sub_avg: ["sub_avg", "submission_avg", "submissionAvg"]
 
 supabase:
   url_env: "SUPABASE_URL"
