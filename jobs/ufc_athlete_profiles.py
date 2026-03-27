@@ -104,23 +104,6 @@ def parse_numeric(value: str | int | float | None) -> float | None:
     return float(match.group(1)) if match else None
 
 
-def parse_date(value: str | None) -> str | None:
-    if not value:
-        return None
-
-    value = normalize_inline_text(value)
-    if not value:
-        return None
-
-    for fmt in ("%b. %d, %Y", "%B %d, %Y", "%b %d, %Y", "%m/%d/%y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(value, fmt).date().isoformat()
-        except ValueError:
-            continue
-
-    return None
-
-
 def parse_birth_date(value: str | None) -> str | None:
     if not value:
         return None
@@ -372,148 +355,6 @@ def extract_stats_record(
     return record
 
 
-def extract_qa_rows_from_dom_text(fighter: FighterSeed, lines: list[str], cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    questions = cfg["selectors"]["qa_question_candidates"]
-    rows: list[dict[str, Any]] = []
-
-    for index, line in enumerate(lines):
-        normalized = normalize_inline_text(line)
-        if not normalized:
-            continue
-
-        matched_question = None
-        answer = None
-
-        for question in questions:
-            if normalized.lower().startswith(question.lower()):
-                matched_question = question
-                answer = normalized[len(question):].strip(" :.-")
-                break
-
-        if matched_question and answer:
-            rows.append(
-                {
-                    "fighter_id": fighter.fighter_id,
-                    "question": matched_question,
-                    "answer": answer[:4000],
-                    "sort_order": index,
-                    "updated_at": now_iso(),
-                }
-            )
-
-    return rows
-
-
-async def extract_qa_rows(page, fighter: FighterSeed, cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    paragraph_texts = await page.locator(".field--name-qna p").all_inner_texts()
-    if paragraph_texts:
-        rows = extract_qa_rows_from_dom_text(fighter, paragraph_texts, cfg)
-        if rows:
-            return rows
-
-    body_text = await extract_body_text(page)
-    lines = [line for line in body_text.splitlines() if line]
-    return extract_qa_rows_from_dom_text(fighter, lines, cfg)
-
-
-def parse_history_text_line(fighter: FighterSeed, line: str) -> dict[str, Any] | None:
-    text = normalize_inline_text(line)
-    if not text:
-        return None
-
-    event_name = None
-    event_date = None
-    notes = text
-
-    match = re.match(r"^(UFC[^()]+)\s*\(([^)]+)\)\s*(.+)$", text, flags=re.IGNORECASE)
-    if match:
-        event_name = normalize_inline_text(match.group(1))
-        event_date = parse_date(match.group(2))
-        notes = normalize_inline_text(match.group(3)) or text
-    else:
-        alt_match = re.match(r"^(UFC[^\d]*\d+)\s*(.+)$", text, flags=re.IGNORECASE)
-        if alt_match:
-            event_name = normalize_inline_text(alt_match.group(1))
-            notes = normalize_inline_text(alt_match.group(2)) or text
-
-    result = None
-    if re.search(r"\b(won|defeated|stopped)\b", notes, flags=re.IGNORECASE):
-        result = "win"
-    elif re.search(r"\b(lost|fell|was knocked out by|submitted by)\b", notes, flags=re.IGNORECASE):
-        result = "loss"
-
-    opponent = None
-    opponent_patterns = [
-        r"(?:over|defeated|stopped)\s+([A-Z][A-Za-z\-\.' ]+?)(?:\s+via|\s+at|\s*$)",
-        r"(?:by)\s+([A-Z][A-Za-z\-\.' ]+?)(?:\s+at|\s*$)",
-    ]
-    for pattern in opponent_patterns:
-        opponent_match = re.search(pattern, notes, flags=re.IGNORECASE)
-        if opponent_match:
-            opponent = normalize_inline_text(opponent_match.group(1))
-            break
-
-    method = None
-    method_patterns = [
-        r"via\s+([^()]+?)(?:\s+at|\s*$)",
-        r"(Decision\s*-\s*[A-Za-z]+)",
-        r"\b(KO/TKO|TKO|KO|Submission|Decision(?:\s*-\s*[A-Za-z]+)?)\b",
-    ]
-    for pattern in method_patterns:
-        method_match = re.search(pattern, notes, flags=re.IGNORECASE)
-        if method_match:
-            method = normalize_inline_text(method_match.group(1))
-            break
-
-    round_value = None
-    time_value = None
-    round_time_match = re.search(
-        r"at\s+([0-9:]+)\s+of\s+the\s+(first|second|third|fourth|fifth)\s+round",
-        notes,
-        flags=re.IGNORECASE,
-    )
-    if round_time_match:
-        time_value = round_time_match.group(1)
-        round_lookup = {
-            "first": 1,
-            "second": 2,
-            "third": 3,
-            "fourth": 4,
-            "fifth": 5,
-        }
-        round_value = round_lookup.get(round_time_match.group(2).lower())
-
-    if not event_name:
-        event_name = text[:255]
-
-    return {
-        "fighter_id": fighter.fighter_id,
-        "event_name": event_name[:255],
-        "event_date": event_date,
-        "opponent_name": opponent,
-        "result": result,
-        "method": method,
-        "round": round_value,
-        "time": time_value,
-        "weight_class": None,
-        "notes": notes[:4000],
-        "updated_at": now_iso(),
-    }
-
-
-async def extract_fight_history_rows(page, fighter: FighterSeed) -> list[dict[str, Any]]:
-    dom_paragraphs = await page.locator(".field--name-qna-ufc p").all_inner_texts()
-    rows = [parse_history_text_line(fighter, paragraph) for paragraph in dom_paragraphs]
-    rows = [row for row in rows if row]
-    if rows:
-        return rows
-
-    body_text = await extract_body_text(page)
-    lines = [line for line in body_text.splitlines() if line.startswith("UFC ")]
-    fallback_rows = [parse_history_text_line(fighter, line) for line in lines]
-    return [row for row in fallback_rows if row]
-
-
 def names_look_related(expected: str, actual: str | None) -> bool:
     if not expected or not actual:
         return False
@@ -548,7 +389,7 @@ def validate_scrape_result(
 ) -> tuple[bool, str]:
     validation_cfg = cfg.get("validation", {})
     require_name_match = validation_cfg.get("require_name_match", True)
-    min_profile_fields = validation_cfg.get("min_profile_fields", 2)
+    min_profile_fields = validation_cfg.get("min_profile_fields", 1)
     min_stats_fields = validation_cfg.get("min_stats_fields", 1)
 
     final_url = result["meta"]["final_url"]
@@ -567,49 +408,11 @@ def validate_scrape_result(
 
     profile_count = count_meaningful_fields(result["profile"], {"fighter_id", "source_url", "updated_at"})
     stats_count = count_meaningful_fields(result["stats"], {"fighter_id", "updated_at"})
-    qa_count = len(result["qa_rows"])
-    history_count = len(result["history_rows"])
 
-    if profile_count < min_profile_fields and stats_count < min_stats_fields and qa_count == 0 and history_count == 0:
-        return False, "no meaningful data extracted"
+    if profile_count < min_profile_fields and stats_count < min_stats_fields:
+        return False, "no meaningful profile or stats extracted"
 
-    return True, (
-        f"profile_fields={profile_count} "
-        f"stats_fields={stats_count} "
-        f"qa_rows={qa_count} "
-        f"history_rows={history_count}"
-    )
-
-
-def maybe_write_debug_payload(cfg: dict[str, Any], fighter: FighterSeed, result: dict[str, Any], payloads: list[Any]) -> None:
-    debug_cfg = cfg.get("debug", {})
-    if not debug_cfg.get("enabled", False):
-        return
-
-    target_name = debug_cfg.get("fighter_name")
-    if target_name and fighter.name.lower() != target_name.lower():
-        return
-
-    if not debug_cfg.get("write_payload_file", True):
-        return
-
-    output_path = debug_cfg.get("payload_file", "debug_ufc_payload.json")
-    debug_blob = {
-        "fighter": {
-            "fighter_id": fighter.fighter_id,
-            "name": fighter.name,
-            "slug": fighter.slug,
-        },
-        "meta": result["meta"],
-        "profile": result["profile"],
-        "stats": result["stats"],
-        "qa_rows_count": len(result["qa_rows"]),
-        "history_rows_count": len(result["history_rows"]),
-        "embedded_payloads": payloads,
-    }
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(debug_blob, f, ensure_ascii=False, indent=2)
+    return True, f"profile_fields={profile_count} stats_fields={stats_count}"
 
 
 async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -626,8 +429,6 @@ async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[st
     result = {
         "profile": extract_profile_record(fighter, final_url, pairs, dom_profile_fields, embedded_payloads, cfg),
         "stats": extract_stats_record(fighter, body_text, embedded_payloads, cfg),
-        "qa_rows": await extract_qa_rows(page, fighter, cfg),
-        "history_rows": await extract_fight_history_rows(page, fighter),
         "meta": {
             "requested_url": url,
             "final_url": final_url,
@@ -635,7 +436,6 @@ async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[st
             "status_code": response.status if response else None,
             "embedded_payloads": len(embedded_payloads),
         },
-        "embedded_payloads_raw": embedded_payloads,
     }
 
     is_valid, reason = validate_scrape_result(fighter, page_title, body_text, result, cfg)
@@ -644,37 +444,65 @@ async def scrape_one(page, fighter: FighterSeed, cfg: dict[str, Any]) -> dict[st
     return result
 
 
-def fetch_fighter_seeds(sb: Client, limit: int) -> list[FighterSeed]:
-    try:
-        fighters_response = sb.table("fighters").select("id,name,ufc_slug").limit(limit).execute()
-        fighters_data = fighters_response.data or []
-        seeds = [
-            FighterSeed(fighter_id=row["id"], name=row["name"], slug=row.get("ufc_slug"))
-            for row in fighters_data
-        ]
-    except Exception:
-        fighters_response = sb.table("fighters").select("id,name").limit(limit).execute()
-        fighters_data = fighters_response.data or []
-        seeds = [FighterSeed(fighter_id=row["id"], name=row["name"]) for row in fighters_data]
+def fetch_all_fighter_seeds(sb: Client, page_size: int) -> list[FighterSeed]:
+    seeds: list[FighterSeed] = []
+    offset = 0
+
+    while True:
+        try:
+            response = (
+                sb.table("fighters")
+                .select("id,name,ufc_slug")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = response.data or []
+            batch = [
+                FighterSeed(fighter_id=row["id"], name=row["name"], slug=row.get("ufc_slug"))
+                for row in rows
+            ]
+        except Exception:
+            response = (
+                sb.table("fighters")
+                .select("id,name")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = response.data or []
+            batch = [FighterSeed(fighter_id=row["id"], name=row["name"]) for row in rows]
+
+        if not batch:
+            break
+
+        seeds.extend(batch)
+
+        if len(batch) < page_size:
+            break
+
+        offset += page_size
 
     fighter_ids = [seed.fighter_id for seed in seeds]
     if not fighter_ids:
         return seeds
 
-    try:
-        profiles_response = (
-            sb.table("fighter_ufc_profiles")
-            .select("fighter_id,source_url")
-            .in_("fighter_id", fighter_ids)
-            .execute()
-        )
-        slug_map = {
-            row["fighter_id"]: extract_slug_from_url(row.get("source_url"))
-            for row in (profiles_response.data or [])
-            if extract_slug_from_url(row.get("source_url"))
-        }
-    except Exception:
-        slug_map = {}
+    slug_map: dict[str, str] = {}
+    chunk_size = 500
+
+    for i in range(0, len(fighter_ids), chunk_size):
+        chunk = fighter_ids[i : i + chunk_size]
+        try:
+            response = (
+                sb.table("fighter_ufc_profiles")
+                .select("fighter_id,source_url")
+                .in_("fighter_id", chunk)
+                .execute()
+            )
+            for row in response.data or []:
+                slug = extract_slug_from_url(row.get("source_url"))
+                if slug:
+                    slug_map[row["fighter_id"]] = slug
+        except Exception:
+            break
 
     for seed in seeds:
         if not seed.slug:
@@ -691,18 +519,6 @@ def upsert_stats(sb: Client, row: dict[str, Any]) -> None:
     sb.table("fighter_ufc_stats").upsert(row).execute()
 
 
-def replace_qa_rows(sb: Client, fighter_id: str, rows: list[dict[str, Any]]) -> None:
-    sb.table("fighter_ufc_qa").delete().eq("fighter_id", fighter_id).execute()
-    if rows:
-        sb.table("fighter_ufc_qa").insert(rows).execute()
-
-
-def replace_fight_history_rows(sb: Client, fighter_id: str, rows: list[dict[str, Any]]) -> None:
-    sb.table("fighter_ufc_fight_history").delete().eq("fighter_id", fighter_id).execute()
-    if rows:
-        sb.table("fighter_ufc_fight_history").insert(rows).execute()
-
-
 async def main():
     cfg = load_config("config/ufc_athlete_profiles.yaml")
     if not cfg["job"].get("enabled", True):
@@ -710,24 +526,26 @@ async def main():
         return
 
     sb = get_supabase(cfg)
-    fighters = fetch_fighter_seeds(sb, cfg["job"]["batch_size"])
+    page_size = cfg["job"].get("page_size", 200)
+    fighters = fetch_all_fighter_seeds(sb, page_size)
 
     test_limit = cfg["job"].get("test_limit")
     if isinstance(test_limit, int) and test_limit > 0:
         fighters = fighters[:test_limit]
 
+    print(f"[INFO] fetched {len(fighters)} fighters")
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=cfg["job"].get("headless", True))
         page = await browser.new_page()
 
-        for fighter in fighters:
+        for index, fighter in enumerate(fighters, start=1):
             try:
                 result = await scrape_one(page, fighter, cfg)
-                maybe_write_debug_payload(cfg, fighter, result, result.pop("embedded_payloads_raw", []))
 
                 if not result["meta"]["valid"]:
                     print(
-                        f"[SKIP] {fighter.name} | "
+                        f"[SKIP] {index}/{len(fighters)} {fighter.name} | "
                         f"title={result['meta']['page_title']} | "
                         f"url={result['meta']['final_url']} | "
                         f"reason={result['meta']['validation_reason']}"
@@ -735,11 +553,9 @@ async def main():
                 else:
                     upsert_profile(sb, result["profile"])
                     upsert_stats(sb, result["stats"])
-                    replace_qa_rows(sb, fighter.fighter_id, result["qa_rows"])
-                    replace_fight_history_rows(sb, fighter.fighter_id, result["history_rows"])
 
                     print(
-                        f"[OK] {fighter.name} | "
+                        f"[OK] {index}/{len(fighters)} {fighter.name} | "
                         f"title={result['meta']['page_title']} | "
                         f"url={result['meta']['final_url']} | "
                         f"{result['meta']['validation_reason']} | "
@@ -747,9 +563,9 @@ async def main():
                     )
 
             except PlaywrightTimeoutError:
-                print(f"[TIMEOUT] {fighter.name}")
+                print(f"[TIMEOUT] {index}/{len(fighters)} {fighter.name}")
             except Exception as exc:
-                print(f"[FAIL] {fighter.name}: {exc}")
+                print(f"[FAIL] {index}/{len(fighters)} {fighter.name}: {exc}")
 
             await page.wait_for_timeout(cfg["job"]["delay_ms"])
 
