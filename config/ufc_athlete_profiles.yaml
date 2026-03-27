@@ -1,26 +1,14 @@
 job:
   name: ufc_athlete_profiles
   enabled: true
-  batch_size: 50
-  test_limit: 5
+  page_size: 200
+  test_limit: 0
   delay_ms: 1200
   timeout_ms: 30000
   headless: true
 
 source:
   profile_url_template: "https://www.ufc.com/athlete/{slug}"
-
-selectors:
-  qa_question_candidates:
-    - "When and why did you start training for fighting?"
-    - "What professional titles have you held?"
-    - "Any accomplishments in amateur combat sports?"
-    - "Any belts/ ranks in grappling disciplines?"
-    - "What has been your toughest fight to date and why?"
-    - "Who is your favorite fighter and why?"
-    - "What was your job before you started fighting?"
-    - "Personal Life / Background"
-    - "Personal Life/Background"
 
 mapping:
   info:
@@ -63,11 +51,5 @@ supabase:
 
 validation:
   require_name_match: true
-  min_profile_fields: 2
+  min_profile_fields: 1
   min_stats_fields: 1
-
-debug:
-  enabled: true
-  fighter_name: "Joby Sanchez"
-  write_payload_file: true
-  payload_file: "debug_ufc_payload.json"
