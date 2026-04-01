@@ -1,0 +1,32 @@
+name: UFC Rankings v2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync-ufc-rankings-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyyaml
+
+      - name: Run UFC rankings sync v2
+        run: |
+          python jobs/ufc_rankings_v2.py
