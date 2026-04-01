@@ -1,0 +1,13 @@
+job:
+  name: ufc_rankings
+  enabled: true
+  timeout_seconds: 30
+  user_agent: "Mozilla/5.0 (compatible; WarRoomRankingsBot/1.0; +https://github.com/David543M/MMA-analytics)"
+
+source:
+  rankings_url: "https://www.ufc.com/rankings"
+  source_label: "UFC Rankings"
+
+supabase:
+  url_env: "SUPABASE_URL"
+  key_env: "SUPABASE_KEY"
