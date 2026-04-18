@@ -15,7 +15,7 @@ Usage:
 
 Environment variables:
     SUPABASE_URL         — project URL
-    SUPABASE_SERVICE_KEY — service-role key (read access is sufficient)
+    SUPABASE_KEY — service-role key (read access is sufficient)
 
 Exit codes:
     0 — all checks passed
@@ -40,9 +40,9 @@ log = logging.getLogger(__name__)
 
 def get_supabase() -> Client:
     url = os.environ.get("SUPABASE_URL", "")
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    key = os.environ.get("SUPABASE_KEY", "")
     if not url or not key:
-        log.error("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
+        log.error("SUPABASE_URL and SUPABASE_KEY must be set")
         sys.exit(1)
     return create_client(url, key)
 
