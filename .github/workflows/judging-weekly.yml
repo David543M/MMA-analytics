@@ -1,0 +1,88 @@
+name: Judging Intelligence Weekly Ingestion
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Run full historical backfill"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  scrape-scorecards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 supabase
+
+      - name: Scrape scorecards
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          BACKFILL_FLAG=""
+          if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
+            BACKFILL_FLAG="--backfill"
+          fi
+          python jobs/scrape_scorecards.py $BACKFILL_FLAG
+
+  scrape-round-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 supabase
+
+      - name: Scrape round stats
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          BACKFILL_FLAG=""
+          if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
+            BACKFILL_FLAG="--backfill"
+          fi
+          python jobs/scrape_round_stats.py $BACKFILL_FLAG
+
+  validate:
+    runs-on: ubuntu-latest
+    needs: [scrape-scorecards, scrape-round-stats]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install supabase
+
+      - name: Validate data
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python jobs/validate_scorecards.py
