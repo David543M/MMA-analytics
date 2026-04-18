@@ -11,7 +11,7 @@ identifiable User-Agent.
 
 Environment variables:
     SUPABASE_URL         — project URL
-    SUPABASE_SERVICE_KEY — service-role key (write access)
+    SUPABASE_KEY — service-role key (write access)
 """
 
 from __future__ import annotations
