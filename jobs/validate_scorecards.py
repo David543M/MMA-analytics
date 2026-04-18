@@ -59,14 +59,26 @@ class ValidationResult:
 def check_scorecard_orphans(supabase: Client) -> ValidationResult:
     """Check that every scorecard references an existing event_bout."""
     try:
-        scorecards = supabase.table("fight_scorecards").select("event_bout_id").execute()
-        bout_ids = {
-            row["id"]
-            for row in (supabase.table("event_bouts").select("id").execute().data or [])
-        }
+        # Paginate scorecards (could exceed 999)
+        scorecard_rows: list[dict] = []
+        offset = 0
+        while True:
+            page = (
+                supabase.table("fight_scorecards")
+                .select("event_bout_id")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            batch = page.data or []
+            scorecard_rows.extend(batch)
+            if len(batch) < 1000:
+                break
+            offset += 1000
+
+        bout_ids = _paginate_ids(supabase, "event_bouts")
         orphans = [
             row["event_bout_id"]
-            for row in (scorecards.data or [])
+            for row in scorecard_rows
             if row["event_bout_id"] not in bout_ids
         ]
 
