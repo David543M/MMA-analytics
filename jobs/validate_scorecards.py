@@ -206,22 +206,46 @@ def check_judge_total_consistency(supabase: Client) -> ValidationResult:
         )
 
 
+def _paginate_ids(supabase: Client, table: str) -> set:
+    """Paginate through a table's id column and return the full set."""
+    ids: set = set()
+    offset = 0
+    page_size = 1000
+    while True:
+        page = supabase.table(table).select("id").range(offset, offset + page_size - 1).execute()
+        batch = page.data or []
+        for row in batch:
+            ids.add(row["id"])
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return ids
+
+
 def check_round_stats_orphans(supabase: Client) -> ValidationResult:
     """Check that every round stat references valid event_bouts and fighters."""
     try:
-        stats = supabase.table("fight_round_stats").select("event_bout_id, fighter_id").limit(5000).execute()
-        bout_ids = {
-            row["id"]
-            for row in (supabase.table("event_bouts").select("id").execute().data or [])
-        }
-        fighter_ids = {
-            row["id"]
-            for row in (supabase.table("fighters").select("id").execute().data or [])
-        }
+        stats_rows: list[dict] = []
+        offset = 0
+        while True:
+            page = (
+                supabase.table("fight_round_stats")
+                .select("event_bout_id, fighter_id")
+                .range(offset, offset + 999)
+                .execute()
+            )
+            batch = page.data or []
+            stats_rows.extend(batch)
+            if len(batch) < 1000:
+                break
+            offset += 1000
+
+        bout_ids = _paginate_ids(supabase, "event_bouts")
+        fighter_ids = _paginate_ids(supabase, "fighters")
 
         bout_orphans = 0
         fighter_orphans = 0
-        for row in stats.data or []:
+        for row in stats_rows:
             if row["event_bout_id"] not in bout_ids:
                 bout_orphans += 1
             if row["fighter_id"] not in fighter_ids:
@@ -231,7 +255,10 @@ def check_round_stats_orphans(supabase: Client) -> ValidationResult:
         return ValidationResult(
             check_name="round_stats_orphans",
             passed=errors == 0,
-            details=f"{bout_orphans} bout orphans, {fighter_orphans} fighter orphans" if errors else "No orphans",
+            details=(
+                f"{bout_orphans} bout orphans, {fighter_orphans} fighter orphans "
+                f"(of {len(stats_rows)} round_stats rows)"
+            ) if errors else f"No orphans (checked {len(stats_rows)} round_stats rows)",
             error_count=errors,
         )
 
