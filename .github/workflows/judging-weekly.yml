@@ -33,7 +33,7 @@ jobs:
       - name: Scrape scorecards
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           BACKFILL_FLAG=""
           if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
@@ -58,7 +58,7 @@ jobs:
       - name: Scrape round stats
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           BACKFILL_FLAG=""
           if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
@@ -84,5 +84,5 @@ jobs:
       - name: Validate data
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python jobs/validate_scorecards.py
