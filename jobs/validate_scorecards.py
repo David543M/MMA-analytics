@@ -58,15 +58,6 @@ class ValidationResult:
 
 def check_scorecard_orphans(supabase: Client) -> ValidationResult:
     """Check that every scorecard references an existing event_bout."""
-    result = (
-        supabase.rpc(
-            "check_scorecard_orphans_raw",
-            {},
-        )
-        .execute()
-    )
-
-    # Fallback: query directly
     try:
         scorecards = supabase.table("fight_scorecards").select("event_bout_id").execute()
         bout_ids = {

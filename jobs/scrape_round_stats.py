@@ -368,68 +368,81 @@ def parse_fight_detail_page(
 # ---------------------------------------------------------------------------
 
 
-def resolve_event_bout_and_fighter(
-    supabase: Client, fighter_name: str, opponent_name: str, event_date: str
-) -> tuple[Optional[str], Optional[str]]:
-    """Resolve event_bout_id and fighter_id for a round stat row."""
-    key_fighter = normalize_name_key(fighter_name)
-    key_opponent = normalize_name_key(opponent_name)
+def _paginate(query_fn, page_size: int = 1000) -> list[dict]:
+    """Paginate a PostgREST query using .range() until all rows fetched.
 
-    # Resolve fighter_id
-    fighter_id = None
-    try:
-        result = supabase.table("fighters").select("id, name").limit(2000).execute()
-        for row in result.data or []:
-            if normalize_name_key(row.get("name", "")) == key_fighter:
-                fighter_id = row["id"]
-                break
-    except Exception as exc:
-        log.warning("Failed to query fighters: %s", exc)
+    query_fn: callable taking (offset, limit) returning an APIResponse.
+    """
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        resp = query_fn(offset, offset + page_size - 1)
+        batch = resp.data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return rows
 
-    # Resolve event_bout_id
-    event_bout_id = None
-    try:
-        result = (
-            supabase.table("event_bouts")
-            .select("id, fighter_a_name, fighter_b_name, event_id, events(date)")
-            .limit(2000)
-            .execute()
-        )
-        for row in result.data or []:
-            row_a = normalize_name_key(row.get("fighter_a_name", ""))
-            row_b = normalize_name_key(row.get("fighter_b_name", ""))
 
-            if (key_fighter == row_a and key_opponent == row_b) or (
-                key_fighter == row_b and key_opponent == row_a
-            ):
-                event_data = row.get("events")
-                if event_date and event_data:
-                    row_date = event_data.get("date", "") if isinstance(event_data, dict) else ""
-                    if row_date and row_date != event_date:
-                        continue
-                event_bout_id = row["id"]
-                break
-    except Exception as exc:
-        log.warning("Failed to query event_bouts: %s", exc)
+def build_matching_indexes(supabase: Client) -> tuple[dict[str, str], dict[tuple[str, str, str], str]]:
+    """Load ALL fighters and event_bouts once, return lookup indexes.
 
-    return event_bout_id, fighter_id
+    Returns:
+      fighter_by_key: normalized_name -> fighter_id
+      bout_by_pair_date: (sorted_name_a_key, sorted_name_b_key, event_date) -> event_bout_id
+    """
+    fighter_rows = _paginate(
+        lambda off, end: supabase.table("fighters").select("id, name").range(off, end).execute()
+    )
+    fighter_by_key: dict[str, str] = {}
+    for row in fighter_rows:
+        key = normalize_name_key(row.get("name") or "")
+        if key and key not in fighter_by_key:
+            fighter_by_key[key] = row["id"]
+    log.info("Loaded %d fighters into matching index", len(fighter_by_key))
+
+    bout_rows = _paginate(
+        lambda off, end: supabase.table("event_bouts")
+        .select("id, fighter_a_name, fighter_b_name, events(date)")
+        .range(off, end)
+        .execute()
+    )
+    bout_by_pair_date: dict[tuple[str, str, str], str] = {}
+    for row in bout_rows:
+        event = row.get("events") or {}
+        date = event.get("date", "") if isinstance(event, dict) else ""
+        key_a = normalize_name_key(row.get("fighter_a_name") or "")
+        key_b = normalize_name_key(row.get("fighter_b_name") or "")
+        if not key_a or not key_b:
+            continue
+        pair = tuple(sorted([key_a, key_b]))
+        bout_by_pair_date[(pair[0], pair[1], date)] = row["id"]
+    log.info("Loaded %d event_bouts into matching index", len(bout_by_pair_date))
+
+    return fighter_by_key, bout_by_pair_date
 
 
 def upsert_round_stats(supabase: Client, stats: list[RoundStatRow]) -> int:
     """Upsert round stat rows into fight_round_stats."""
     upserted = 0
+    unmatched_bouts = 0
+    unmatched_fighters = 0
 
-    # Cache resolution results to avoid repeated queries
-    resolution_cache: dict[tuple[str, str, str], tuple[Optional[str], Optional[str]]] = {}
+    fighter_by_key, bout_by_pair_date = build_matching_indexes(supabase)
 
     for row in stats:
-        cache_key = (row.fighter_name, row.opponent_name, row.event_date)
-        if cache_key not in resolution_cache:
-            resolution_cache[cache_key] = resolve_event_bout_and_fighter(
-                supabase, row.fighter_name, row.opponent_name, row.event_date
-            )
+        key_fighter = normalize_name_key(row.fighter_name)
+        key_opponent = normalize_name_key(row.opponent_name)
+        pair = tuple(sorted([key_fighter, key_opponent]))
 
-        event_bout_id, fighter_id = resolution_cache[cache_key]
+        event_bout_id = bout_by_pair_date.get((pair[0], pair[1], row.event_date))
+        fighter_id = fighter_by_key.get(key_fighter)
+
+        if not event_bout_id:
+            unmatched_bouts += 1
+        if not fighter_id:
+            unmatched_fighters += 1
 
         if not event_bout_id or not fighter_id:
             log.debug(
@@ -475,6 +488,10 @@ def upsert_round_stats(supabase: Client, stats: list[RoundStatRow]) -> int:
         except Exception as exc:
             log.warning("Upsert failed for %s R%d: %s", row.fighter_name, row.round_number, exc)
 
+    log.info(
+        "Matching: %d unmatched bouts, %d unmatched fighters out of %d total rows",
+        unmatched_bouts, unmatched_fighters, len(stats),
+    )
     return upserted
 
 

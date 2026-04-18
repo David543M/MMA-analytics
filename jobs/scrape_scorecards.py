@@ -314,13 +314,22 @@ class _BoutIndex:
     def __init__(self, supabase: "Client") -> None:
         self.by_pair_date: dict[tuple[str, str, str], str] = {}
         # Pull all event_bouts joined to their event date
-        result = (
-            supabase.table("event_bouts")
-            .select("id, fighter_a_name, fighter_b_name, events(date)")
-            .limit(10_000)
-            .execute()
-        )
-        for row in result.data or []:
+        rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            page = (
+                supabase.table("event_bouts")
+                .select("id, fighter_a_name, fighter_b_name, events(date)")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = page.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        for row in rows:
             event = row.get("events") or {}
             date = event.get("date", "") if isinstance(event, dict) else ""
             key_a = normalize_name_key(row.get("fighter_a_name") or "")
